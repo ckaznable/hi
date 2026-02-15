@@ -1,0 +1,21 @@
+[package]
+name = "hi-remote"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "hi_remote"
+path = "src/lib.rs"
+
+[dependencies]
+shared = { workspace = true }
+hi-core = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+teloxide = { version = "0.17", default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }

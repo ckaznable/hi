@@ -1,0 +1,20 @@
+[package]
+name = "hi-tui"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "hi_tui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hi-tui-standalone"
+path = "src/main.rs"
+
+[dependencies]
+hi-core = { workspace = true }
+shared = { workspace = true }
+ratatui = "0.29"
+crossterm = "0.28"
+tokio = { workspace = true }
+anyhow = { workspace = true }

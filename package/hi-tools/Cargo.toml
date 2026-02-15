@@ -1,0 +1,12 @@
+[package]
+name = "hi-tools"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+rig-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }

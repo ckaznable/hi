@@ -1,0 +1,17 @@
+[package]
+name = "hi-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+shared = { workspace = true }
+hi-history = { workspace = true }
+hi-tools = { workspace = true }
+rig-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+futures = "0.3"
+tokio-cron-scheduler = "0.15"

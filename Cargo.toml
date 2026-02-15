@@ -1,0 +1,69 @@
+[package]
+name = "hi-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "hi"
+path = "src/main.rs"
+
+[dependencies]
+hi-tui = { workspace = true, optional = true }
+hi-remote = { workspace = true }
+hi-core = { workspace = true }
+shared = { workspace = true }
+argh = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+libc = "0.2"
+
+[features]
+default = []
+tui = ["dep:hi-tui"]
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = false
+strip = true
+
+[workspace]
+members = [
+    "package/shared",
+    "package/hi-history",
+    "package/hi-tools",
+    "package/hi-core",
+    "package/hi-tui",
+    "package/hi-remote",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+shared = { path = "package/shared" }
+hi-history = { path = "package/hi-history" }
+hi-tools = { path = "package/hi-tools" }
+hi-core = { path = "package/hi-core" }
+hi-tui = { path = "package/hi-tui" }
+hi-remote = { path = "package/hi-remote" }
+
+anyhow = "1"
+argh = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "process", "fs", "time", "signal"] }
+rig-core = { git = "https://github.com/0xPlaygrounds/rig.git", rev = "dc45224a47108c1d3bdbb53b744b1964434ae549"}
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
+reqwest = { version = "0.13" }
+
