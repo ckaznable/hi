@@ -1,4 +1,5 @@
 pub mod bash;
+pub mod heartbeat_write;
 pub mod list_files;
 pub mod memory;
 pub mod read_file;
@@ -7,6 +8,7 @@ pub mod schedule_view;
 pub mod write_file;
 
 pub use bash::BashTool;
+pub use heartbeat_write::HeartbeatWriteTool;
 pub use list_files::ListFilesTool;
 pub use memory::MemoryTool;
 pub use read_file::ReadFileTool;

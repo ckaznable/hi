@@ -4,7 +4,7 @@ A terminal LLM chat tool implemented in Rust, organized as a workspace:
 
 - `shared`: configuration and path management
 - `hi-history`: chat history (JSON + LZ4 compression)
-- `hi-tools`: built-in tools (`bash` / `list_files` / `read_file` / `write_file` / `read_skills` / `memory` / `view_schedules`)
+- `hi-tools`: built-in tools (`bash` / `list_files` / `read_file` / `write_file` / `read_skills` / `memory` / `view_schedules` / `heartbeat_write`)
 - `hi-core`: agent/session logic, skill loading, context injection, heartbeat, scheduling
 - `hi-tui`: interactive TUI built with `ratatui` + `crossterm`
 - `hi-remote`: bridge for external communication apps (currently Telegram)
@@ -22,12 +22,13 @@ A terminal LLM chat tool implemented in Rust, organized as a workspace:
   - `read_skills`
   - `memory`
   - `view_schedules`
+  - `heartbeat_write` (heartbeat agent only)
 - Skill system: loads `skills/*.md` with optional `description` in frontmatter
 - Optimized context injection:
   - Full context on first injection
   - No reinjection when unchanged
   - Delta updates when context changes
-- Optional heartbeat task (fixed interval)
+- Optional heartbeat task (fixed interval, with optional HEARTBEAT.md task ledger)
 - Optional cron scheduling (`tokio-cron-scheduler`)
 - MCP (Model Context Protocol) tool integration via stdio and HTTP transports
 - Telegram bot remote mode (via `hi-remote`, one independent session per chat)
@@ -180,6 +181,51 @@ Example:
   ]
 }
 ```
+
+## Heartbeat Task Ledger (HEARTBEAT.md)
+
+The heartbeat system supports a file-backed task ledger at `data_dir()/HEARTBEAT.md`. When present and containing pending tasks, the heartbeat loop picks them up one at a time instead of using the static `prompt` from config.
+
+### Format
+
+```markdown
+# Heartbeat Tasks
+
+- [pending] check-logs: Review system logs for errors
+  Optional indented description with more details
+- [in-progress] backup-db: Run database backup
+- [done] cleanup: Clean up temp files
+- [failed] deploy: Deploy to staging
+```
+
+Each task line follows the pattern: `- [status] task-id: Task title`
+
+Indented lines immediately after a task are treated as its description.
+
+### Task Lifecycle
+
+Valid status transitions:
+- `pending` → `in-progress` (heartbeat picks up the task)
+- `in-progress` → `done` (task completed successfully)
+- `in-progress` → `failed` (task encountered an error)
+
+When the heartbeat timer fires:
+1. Load `HEARTBEAT.md` from `data_dir()`
+2. Find the first task with status `pending`
+3. Mark it `in-progress` and persist to disk
+4. Send the task as a prompt to the heartbeat agent
+5. The agent uses the `heartbeat_write` tool to mark it `done` or `failed`
+6. If no pending tasks exist, fall back to the static `prompt` from config
+
+### heartbeat_write Tool
+
+The heartbeat agent has access to a `heartbeat_write` tool for updating task status:
+
+- `task_id` (required): The task identifier to update
+- `new_status` (required): One of `pending`, `in-progress`, `done`, `failed`
+- `note` (optional): Text to append to the task description
+
+Invalid transitions (e.g. `pending` → `done`) are rejected with an error.
 
 ## Compact Settings
 
