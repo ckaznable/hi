@@ -4,7 +4,7 @@ A terminal LLM chat tool implemented in Rust, organized as a workspace:
 
 - `shared`: configuration and path management
 - `hi-history`: chat history (JSON + LZ4 compression)
-- `hi-tools`: built-in tools (`bash` / `list_files` / `read_file` / `write_file` / `read_skills`)
+- `hi-tools`: built-in tools (`bash` / `list_files` / `read_file` / `write_file` / `read_skills` / `memory` / `view_schedules`)
 - `hi-core`: agent/session logic, skill loading, context injection, heartbeat, scheduling
 - `hi-tui`: interactive TUI built with `ratatui` + `crossterm`
 - `hi-remote`: bridge for external communication apps (currently Telegram)
@@ -20,6 +20,8 @@ A terminal LLM chat tool implemented in Rust, organized as a workspace:
   - `read_file`
   - `write_file`
   - `read_skills`
+  - `memory`
+  - `view_schedules`
 - Skill system: loads `skills/*.md` with optional `description` in frontmatter
 - Optimized context injection:
   - Full context on first injection
@@ -82,36 +84,6 @@ hi init
 cargo run --features tui -- tui
 ```
 
-
-### Option 2: Install a local executable
-
-```bash
-# Default install (without TUI)
-cargo install --path bin/hi
-
-# Install with TUI support
-cargo install --path bin/hi --features tui
-
-# Use after install
-hi tui
-hi remote
-```
-
-## Quick Start
-
-1. Run guided setup:
-
-```bash
-hi init
-```
-
-   This walks you through choosing a provider, model, API key, and context window, then writes `config.json` at the standard config path (e.g. `~/.config/hi/config.json` on Linux). Use `hi init --quick` to skip prompts and write a default template instead.
-
-2. Run TUI:
-
-```bash
-cargo run -p hi-cli --features tui -- tui
-```
 
 > You can also run `hi tui` if the executable was installed with `--features tui`.
 
@@ -353,6 +325,18 @@ Add `remote` section in `config.json`:
 - Splits and sends replies automatically if output exceeds 4096 characters
 - Automatically waits and retries on Telegram rate limits (`429`)
 
+### Telegram slash commands
+
+- `/help`: list available commands
+- `/compact`: compact current session history
+- `/new`: reset current session
+- `/cron`: list schedules loaded from `schedules.json` (or config fallback)
+- `/cron add <name> <min> <hour> <dom> <mon> <dow> <prompt>`: append a schedule to `schedules.json`
+- `/cron remove <name>`: remove a schedule from `schedules.json`
+- `/heartbeat`: show effective heartbeat settings
+- `/mcp`: list configured MCP servers from `mcp.json`
+- `/skills`: list loaded skills from `config_dir()/skills/*.md`
+
 ## MCP Tool Integration
 
 MCP (Model Context Protocol) servers can be connected to provide additional tools to the LLM agent. Both stdio (child process) and HTTP (Streamable HTTP) transports are supported.
@@ -405,6 +389,7 @@ You are a senior Rust engineer focusing on correctness and performance.
 - `/model`: switch back to primary model
 - `/model small`: switch to small model
 - `/model primary`: switch back to primary model
+- `/skills`: list loaded skills
 - `/quit` or `/exit`: quit
 - `Esc` or `Ctrl+C`: quit
 
