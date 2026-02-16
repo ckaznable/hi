@@ -941,6 +941,7 @@ name = "hi-tools"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "croner",
  "rig-core",
  "serde",
  "serde_json",

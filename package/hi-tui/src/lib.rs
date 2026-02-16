@@ -36,8 +36,7 @@ struct App {
 }
 
 fn render(frame: &mut Frame, app: &App) {
-    let chunks =
-        Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).split(frame.area());
+    let chunks = Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).split(frame.area());
 
     let mut lines: Vec<Line> = Vec::new();
     for (role, content) in &app.messages {
@@ -92,8 +91,8 @@ fn render(frame: &mut Frame, app: &App) {
     frame.render_widget(messages_widget, chunks[0]);
 
     let input_title = if app.waiting { " Wait... " } else { " > " };
-    let input_widget = Paragraph::new(app.input.as_str())
-        .block(Block::bordered().title(input_title));
+    let input_widget =
+        Paragraph::new(app.input.as_str()).block(Block::bordered().title(input_title));
 
     frame.render_widget(input_widget, chunks[1]);
 
@@ -152,7 +151,8 @@ async fn run(
         while let Some(cmd) = cmd_rx.recv().await {
             match cmd {
                 SessionCmd::Send(text) => {
-                    let (stream_tx, mut stream_rx) = mpsc::channel::<String>(hi_core::provider::STREAM_CHANNEL_CAPACITY);
+                    let (stream_tx, mut stream_rx) =
+                        mpsc::channel::<String>(hi_core::provider::STREAM_CHANNEL_CAPACITY);
                     let forwarder_tx = reply_tx.clone();
                     tokio::spawn(async move {
                         while let Some(chunk) = stream_rx.recv().await {
@@ -176,7 +176,9 @@ async fn run(
                     let result = match target.as_str() {
                         "small" => session.switch_to_small_model(),
                         "primary" | "" => session.switch_to_primary_model(),
-                        _ => Err(anyhow::anyhow!("Unknown model target: {target}. Use 'small' or 'primary'.")),
+                        _ => Err(anyhow::anyhow!(
+                            "Unknown model target: {target}. Use 'small' or 'primary'."
+                        )),
                     };
                     match result {
                         Ok(name) => {
@@ -226,7 +228,8 @@ async fn run(
                     app.waiting = false;
                 }
                 SessionReply::ModelSwitched(name) => {
-                    app.messages.push(("system".to_string(), format!("Switched to model: {name}")));
+                    app.messages
+                        .push(("system".to_string(), format!("Switched to model: {name}")));
                     app.waiting = false;
                 }
             }
@@ -238,9 +241,7 @@ async fn run(
 
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && key.code == KeyCode::Char('c')
-                {
+                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
                     app.should_quit = true;
                     continue;
                 }
@@ -272,7 +273,11 @@ async fn run(
                         }
 
                         if trimmed == "/model" || trimmed.starts_with("/model ") {
-                            let target = trimmed.strip_prefix("/model").unwrap_or("").trim().to_string();
+                            let target = trimmed
+                                .strip_prefix("/model")
+                                .unwrap_or("")
+                                .trim()
+                                .to_string();
                             app.waiting = true;
                             let _ = cmd_tx.send(SessionCmd::SwitchModel(target));
                             continue;

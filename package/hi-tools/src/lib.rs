@@ -1,17 +1,24 @@
 pub mod bash;
+pub mod heartbeat_edit;
 pub mod heartbeat_write;
 pub mod list_files;
 pub mod memory;
 pub mod read_file;
 pub mod read_skills;
+pub mod schedule_add;
+pub mod schedule_remove;
+mod schedule_storage;
 pub mod schedule_view;
 pub mod write_file;
 
 pub use bash::BashTool;
+pub use heartbeat_edit::HeartbeatEditTool;
 pub use heartbeat_write::HeartbeatWriteTool;
 pub use list_files::ListFilesTool;
 pub use memory::MemoryTool;
 pub use read_file::ReadFileTool;
 pub use read_skills::{ReadSkillsTool, SkillSummary};
+pub use schedule_add::ScheduleAddTool;
+pub use schedule_remove::ScheduleRemoveTool;
 pub use schedule_view::ScheduleViewTool;
 pub use write_file::WriteFileTool;

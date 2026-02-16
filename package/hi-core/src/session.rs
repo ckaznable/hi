@@ -7,7 +7,9 @@ use shared::config::{CompactStrategy, ModelConfig};
 
 use crate::context::ContextManager;
 use crate::mcp::{McpManager, load_and_connect};
-use crate::provider::{ChatAgent, create_agent, create_agent_from_small, create_agent_from_small_with_tools};
+use crate::provider::{
+    ChatAgent, create_agent, create_agent_from_small, create_agent_from_small_with_tools,
+};
 use crate::skills::{Skill, build_preamble, load_skills};
 
 const DEFAULT_COMPACT_PROMPT: &str = "Summarize the following conversation concisely. \
@@ -45,10 +47,7 @@ impl ChatSession {
         let data_dir = shared::paths::data_dir()?;
 
         let skills = load_skills(&config_dir)?;
-        let effective_preamble = config
-            .preamble
-            .as_deref()
-            .or(Some(DEFAULT_PREAMBLE));
+        let effective_preamble = config.preamble.as_deref().or(Some(DEFAULT_PREAMBLE));
         let preamble = build_preamble(effective_preamble, &skills);
         let skill_summaries = ContextManager::skill_summaries(&skills);
 
@@ -74,10 +73,7 @@ impl ChatSession {
     }
 
     fn effective_preamble(&self) -> &str {
-        self.config
-            .preamble
-            .as_deref()
-            .unwrap_or(DEFAULT_PREAMBLE)
+        self.config.preamble.as_deref().unwrap_or(DEFAULT_PREAMBLE)
     }
 
     pub async fn send_message(&mut self, text: &str) -> Result<String> {
@@ -91,6 +87,9 @@ impl ChatSession {
             "read_skills: List available skills".to_string(),
             "memory: Read/write persistent hierarchical markdown memory".to_string(),
             "view_schedules: View configured cron schedules".to_string(),
+            "cron_add: Add a cron schedule (name, cron expression, prompt, optional model)".to_string(),
+            "cron_remove: Remove a cron schedule by name".to_string(),
+            "heartbeat_edit: Replace HEARTBEAT.md content with validated markdown".to_string(),
         ];
         for name in &self.mcp_tool_names {
             tool_descriptions.push(format!("{name}: MCP tool"));
@@ -138,7 +137,10 @@ impl ChatSession {
             _ => (0.8, false, CompactStrategy::Truncate),
         };
 
-        if !self.history.needs_compact_with_ratio(self.config.context_window, trigger_ratio) {
+        if !self
+            .history
+            .needs_compact_with_ratio(self.config.context_window, trigger_ratio)
+        {
             return;
         }
 
@@ -252,6 +254,9 @@ impl ChatSession {
             "read_skills: List available skills".to_string(),
             "memory: Read/write persistent hierarchical markdown memory".to_string(),
             "view_schedules: View configured cron schedules".to_string(),
+            "cron_add: Add a cron schedule (name, cron expression, prompt, optional model)".to_string(),
+            "cron_remove: Remove a cron schedule by name".to_string(),
+            "heartbeat_edit: Replace HEARTBEAT.md content with validated markdown".to_string(),
         ];
         for name in &self.mcp_tool_names {
             tool_descriptions.push(format!("{name}: MCP tool"));
@@ -281,7 +286,9 @@ impl ChatSession {
                     self.switch_to_small_model()?;
                     let rig_messages = self.history.to_rig_messages();
                     let retry_prompt = Message::user(text);
-                    self.agent.stream_chat(retry_prompt, rig_messages, fallback_tx).await?
+                    self.agent
+                        .stream_chat(retry_prompt, rig_messages, fallback_tx)
+                        .await?
                 } else {
                     return Err(e);
                 }
@@ -331,7 +338,8 @@ impl ChatSession {
             &self.skills,
         );
         let skill_summaries = ContextManager::skill_summaries(&self.skills);
-        let agent = create_agent_from_small_with_tools(small_config, Some(&preamble), skill_summaries)?;
+        let agent =
+            create_agent_from_small_with_tools(small_config, Some(&preamble), skill_summaries)?;
 
         self.agent = agent;
         self.using_small_model = true;

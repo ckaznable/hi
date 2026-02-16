@@ -2,8 +2,8 @@ use anyhow::Result;
 use futures::StreamExt;
 use rig::agent::{Agent, MultiTurnStreamItem};
 use rig::completion::Chat;
-use rig::completion::message::Message;
 use rig::completion::PromptError;
+use rig::completion::message::Message;
 use rig::message::Text;
 use rig::prelude::CompletionClient;
 use rig::providers::{anthropic, gemini, ollama, openai};
@@ -12,7 +12,10 @@ use rig::tool::ToolDyn;
 use shared::config::{ModelConfig, Provider, SmallModelConfig};
 use tokio::sync::mpsc;
 
-use hi_tools::{BashTool, ListFilesTool, MemoryTool, ReadFileTool, ReadSkillsTool, ScheduleViewTool, SkillSummary, WriteFileTool};
+use hi_tools::{
+    BashTool, HeartbeatEditTool, ListFilesTool, MemoryTool, ReadFileTool, ReadSkillsTool,
+    ScheduleAddTool, ScheduleRemoveTool, ScheduleViewTool, SkillSummary, WriteFileTool,
+};
 
 pub const STREAM_CHANNEL_CAPACITY: usize = 256;
 
@@ -29,9 +32,9 @@ macro_rules! consume_stream {
         let mut stream = $agent.stream_chat($prompt, $history).await;
         while let Some(chunk) = stream.next().await {
             match chunk {
-                Ok(MultiTurnStreamItem::StreamAssistantItem(
-                    StreamedAssistantContent::Text(Text { text }),
-                )) => {
+                Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(
+                    Text { text },
+                ))) => {
                     $acc.push_str(&text);
                     if let Err(e) = $chunk_tx.send(text).await {
                         tracing::warn!("Channel send failed: {e}");
@@ -86,6 +89,9 @@ fn build_tools(skill_summaries: Vec<SkillSummary>) -> Vec<Box<dyn ToolDyn>> {
     let schedules_path = shared::paths::data_dir()
         .map(|d| d.join("schedules.json"))
         .unwrap_or_else(|_| std::path::PathBuf::from("schedules.json"));
+    let heartbeat_path = shared::paths::data_dir()
+        .map(|d| d.join("HEARTBEAT.md"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("HEARTBEAT.md"));
     vec![
         Box::new(BashTool) as Box<dyn ToolDyn>,
         Box::new(ListFilesTool),
@@ -93,7 +99,10 @@ fn build_tools(skill_summaries: Vec<SkillSummary>) -> Vec<Box<dyn ToolDyn>> {
         Box::new(WriteFileTool),
         Box::new(ReadSkillsTool::new(skill_summaries)),
         Box::new(MemoryTool::new(memory_path)),
-        Box::new(ScheduleViewTool::new(schedules_path)),
+        Box::new(ScheduleViewTool::new(schedules_path.clone())),
+        Box::new(ScheduleAddTool::new(schedules_path.clone())),
+        Box::new(ScheduleRemoveTool::new(schedules_path)),
+        Box::new(HeartbeatEditTool::new(heartbeat_path)),
     ]
 }
 
@@ -105,14 +114,28 @@ pub fn create_agent(
 ) -> Result<ChatAgent> {
     let mut tools = build_tools(skill_summaries);
     tools.extend(extra_tools);
-    create_agent_from_parts(&config.provider, &config.model, &config.api_key, &config.api_base, preamble, tools)
+    create_agent_from_parts(
+        &config.provider,
+        &config.model,
+        &config.api_key,
+        &config.api_base,
+        preamble,
+        tools,
+    )
 }
 
 pub fn create_agent_from_small(
     config: &SmallModelConfig,
     preamble: Option<&str>,
 ) -> Result<ChatAgent> {
-    create_agent_from_parts(&config.provider, &config.model, &config.api_key, &config.api_base, preamble, vec![])
+    create_agent_from_parts(
+        &config.provider,
+        &config.model,
+        &config.api_key,
+        &config.api_base,
+        preamble,
+        vec![],
+    )
 }
 
 pub fn create_agent_from_small_with_tools(
@@ -121,7 +144,14 @@ pub fn create_agent_from_small_with_tools(
     skill_summaries: Vec<SkillSummary>,
 ) -> Result<ChatAgent> {
     let tools = build_tools(skill_summaries);
-    create_agent_from_parts(&config.provider, &config.model, &config.api_key, &config.api_base, preamble, tools)
+    create_agent_from_parts(
+        &config.provider,
+        &config.model,
+        &config.api_key,
+        &config.api_base,
+        preamble,
+        tools,
+    )
 }
 
 pub(crate) fn create_agent_from_parts(
@@ -141,11 +171,13 @@ pub(crate) fn create_agent_from_parts(
             }
             let client = builder.build()?;
             let agent = if tools.is_empty() {
-                client.agent(model)
+                client
+                    .agent(model)
                     .preamble(preamble.unwrap_or_default())
                     .build()
             } else {
-                client.agent(model)
+                client
+                    .agent(model)
                     .tools(tools)
                     .preamble(preamble.unwrap_or_default())
                     .build()
@@ -160,11 +192,13 @@ pub(crate) fn create_agent_from_parts(
             }
             let client = builder.build()?;
             let agent = if tools.is_empty() {
-                client.agent(model)
+                client
+                    .agent(model)
                     .preamble(preamble.unwrap_or_default())
                     .build()
             } else {
-                client.agent(model)
+                client
+                    .agent(model)
                     .tools(tools)
                     .preamble(preamble.unwrap_or_default())
                     .build()
@@ -179,11 +213,13 @@ pub(crate) fn create_agent_from_parts(
             }
             let client = builder.build()?;
             let agent = if tools.is_empty() {
-                client.agent(model)
+                client
+                    .agent(model)
                     .preamble(preamble.unwrap_or_default())
                     .build()
             } else {
-                client.agent(model)
+                client
+                    .agent(model)
                     .tools(tools)
                     .preamble(preamble.unwrap_or_default())
                     .build()
@@ -198,11 +234,13 @@ pub(crate) fn create_agent_from_parts(
             }
             let client = builder.build()?;
             let agent = if tools.is_empty() {
-                client.agent(model)
+                client
+                    .agent(model)
                     .preamble(preamble.unwrap_or_default())
                     .build()
             } else {
-                client.agent(model)
+                client
+                    .agent(model)
                     .tools(tools)
                     .preamble(preamble.unwrap_or_default())
                     .build()
@@ -216,11 +254,13 @@ pub(crate) fn create_agent_from_parts(
             }
             let client = builder.build()?;
             let agent = if tools.is_empty() {
-                client.agent(model)
+                client
+                    .agent(model)
                     .preamble(preamble.unwrap_or_default())
                     .build()
             } else {
-                client.agent(model)
+                client
+                    .agent(model)
                     .tools(tools)
                     .preamble(preamble.unwrap_or_default())
                     .build()

@@ -36,9 +36,10 @@ impl Tool for MemoryTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: "memory".to_string(),
-            description: "Read and write persistent memory organized as hierarchical markdown sections. \
+            description:
+                "Read and write persistent memory organized as hierarchical markdown sections. \
                 Use this to store important information across conversations."
-                .to_string(),
+                    .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -115,7 +116,11 @@ fn parse_sections(text: &str) -> Vec<Section> {
                 }
             }
             ancestor_stack.push((level, name.clone()));
-            current_path = ancestor_stack.iter().map(|(_, n)| n.as_str()).collect::<Vec<_>>().join("/");
+            current_path = ancestor_stack
+                .iter()
+                .map(|(_, n)| n.as_str())
+                .collect::<Vec<_>>()
+                .join("/");
             current_level = level;
             current_content = String::new();
         } else if !current_content.is_empty() || !line.is_empty() {
@@ -221,7 +226,9 @@ fn write_memory(path: &Path, section_path: &str, content: &str) -> Result<String
 fn rebuild_with_section(text: &str, path_parts: &[&str], content: &str) -> String {
     let sections = parse_sections(text);
     let target_path = path_parts.join("/").to_lowercase();
-    let exists = sections.iter().any(|s| s.path.to_lowercase() == target_path);
+    let exists = sections
+        .iter()
+        .any(|s| s.path.to_lowercase() == target_path);
 
     if exists {
         let mut result = String::new();
@@ -257,7 +264,9 @@ fn rebuild_with_section(text: &str, path_parts: &[&str], content: &str) -> Strin
         for (i, part) in path_parts.iter().enumerate() {
             let level = i + 1;
             let partial_path = path_parts[..=i].join("/").to_lowercase();
-            let exists_partial = sections.iter().any(|s| s.path.to_lowercase() == partial_path);
+            let exists_partial = sections
+                .iter()
+                .any(|s| s.path.to_lowercase() == partial_path);
             if !exists_partial {
                 let hashes = "#".repeat(level);
                 result.push_str(&format!("{} {}\n", hashes, part));
@@ -308,10 +317,7 @@ mod tests {
             parse_header_line("## Sub Section"),
             Some((2, "Sub Section".to_string()))
         );
-        assert_eq!(
-            parse_header_line("### Deep"),
-            Some((3, "Deep".to_string()))
-        );
+        assert_eq!(parse_header_line("### Deep"), Some((3, "Deep".to_string())));
         assert_eq!(parse_header_line("Not a header"), None);
         assert_eq!(parse_header_line("#NoSpace"), None);
         assert_eq!(parse_header_line("# "), None);
@@ -320,7 +326,8 @@ mod tests {
 
     #[test]
     fn test_parse_sections_basic() {
-        let text = "# Notes\nSome notes here\n\n## Projects\nProject list\n\n### hi-cli\nRust chat tool";
+        let text =
+            "# Notes\nSome notes here\n\n## Projects\nProject list\n\n### hi-cli\nRust chat tool";
         let sections = parse_sections(text);
         assert_eq!(sections.len(), 3);
         assert_eq!(sections[0].path, "Notes");

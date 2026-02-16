@@ -53,11 +53,18 @@ impl McpManager {
             }
         }
 
-        (Self { _services: services }, all_tools)
+        (
+            Self {
+                _services: services,
+            },
+            all_tools,
+        )
     }
 
     pub fn empty() -> Self {
-        Self { _services: Vec::new() }
+        Self {
+            _services: Vec::new(),
+        }
     }
 }
 
@@ -92,7 +99,8 @@ async fn connect_stdio(
     let transport = TokioChildProcess::new(cmd)
         .with_context(|| format!("Failed to spawn stdio MCP server '{name}'"))?;
 
-    let service = ().serve(transport)
+    let service = ()
+        .serve(transport)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to initialize MCP server '{name}': {e}"))?;
 
@@ -100,13 +108,11 @@ async fn connect_stdio(
     Ok((Box::new(StdioService(service)), tools))
 }
 
-async fn connect_http(
-    name: &str,
-    url: &str,
-) -> Result<(Box<dyn Send + Sync>, Vec<McpTool>)> {
+async fn connect_http(name: &str, url: &str) -> Result<(Box<dyn Send + Sync>, Vec<McpTool>)> {
     let transport = StreamableHttpClientTransport::from_uri(url);
 
-    let service = ().serve(transport)
+    let service = ()
+        .serve(transport)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to initialize HTTP MCP server '{name}': {e}"))?;
 
@@ -118,7 +124,9 @@ async fn discover_tools(
     service: &RunningService<RoleClient, ()>,
     name: &str,
 ) -> Result<Vec<McpTool>> {
-    let raw_tools = service.peer().list_all_tools()
+    let raw_tools = service
+        .peer()
+        .list_all_tools()
         .await
         .with_context(|| format!("Failed to list tools from MCP server '{name}'"))?;
 
@@ -140,10 +148,14 @@ pub async fn load_and_connect() -> (McpManager, Vec<Box<dyn ToolDyn>>) {
 }
 
 pub fn mcp_tool_descriptions(tools: &[Box<dyn ToolDyn>], builtin_count: usize) -> Vec<String> {
-    tools.iter().skip(builtin_count).map(|t| {
-        let name = t.name();
-        format!("{name}: MCP tool")
-    }).collect()
+    tools
+        .iter()
+        .skip(builtin_count)
+        .map(|t| {
+            let name = t.name();
+            format!("{name}: MCP tool")
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -180,7 +192,9 @@ mod tests {
                 url: None,
             },
         );
-        let config = McpConfig { mcp_servers: servers };
+        let config = McpConfig {
+            mcp_servers: servers,
+        };
         let (manager, tools) = McpManager::connect(&config).await;
         assert_eq!(manager._services.len(), 0);
         assert!(tools.is_empty());

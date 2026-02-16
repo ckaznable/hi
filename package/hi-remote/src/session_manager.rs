@@ -47,11 +47,7 @@ impl SessionManager {
 
         for id in &expired {
             sessions.remove(id);
-            debug!(
-                chat_id = id,
-                ttl_secs,
-                "Evicted idle session"
-            );
+            debug!(chat_id = id, ttl_secs, "Evicted idle session");
         }
 
         // Reuse existing session
@@ -63,15 +59,13 @@ impl SessionManager {
 
         // Capacity eviction: evict oldest-idle session if at limit
         if sessions.len() >= max_sessions {
-            if let Some((&oldest_id, _)) = sessions
-                .iter()
-                .min_by_key(|(_, entry)| entry.last_activity)
+            if let Some((&oldest_id, _)) =
+                sessions.iter().min_by_key(|(_, entry)| entry.last_activity)
             {
                 sessions.remove(&oldest_id);
                 debug!(
                     chat_id = oldest_id,
-                    max_sessions,
-                    "Evicted oldest session (capacity)"
+                    max_sessions, "Evicted oldest session (capacity)"
                 );
             }
         }

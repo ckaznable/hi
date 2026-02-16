@@ -49,8 +49,8 @@ impl Tool for ScheduleViewTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let schedules = load_schedules(&self.schedules_path)
-            .map_err(|e| ScheduleViewError(e.to_string()))?;
+        let schedules =
+            load_schedules(&self.schedules_path).map_err(|e| ScheduleViewError(e.to_string()))?;
 
         if schedules.is_empty() {
             return Ok("No schedules configured.".to_string());
@@ -157,7 +157,10 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].name, "daily");
         assert_eq!(result[1].name, "hourly");
-        assert_eq!(result[1].model, Some(serde_json::Value::String("small".to_string())));
+        assert_eq!(
+            result[1].model,
+            Some(serde_json::Value::String("small".to_string()))
+        );
     }
 
     #[test]

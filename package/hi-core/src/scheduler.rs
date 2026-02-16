@@ -1,10 +1,10 @@
+use crate::model_pool::ModelPool;
 use anyhow::Result;
+use shared::config::{ModelConfig, ScheduleTaskConfig};
+use shared::runtime_index;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_cron_scheduler::{Job, JobScheduler};
-use shared::config::{ModelConfig, ScheduleTaskConfig};
-use shared::runtime_index;
-use crate::model_pool::ModelPool;
 
 pub struct Scheduler {
     job_scheduler: JobScheduler,
@@ -16,9 +16,7 @@ impl Scheduler {
         pool: Arc<ModelPool>,
         tx: mpsc::UnboundedSender<String>,
     ) -> Result<Self> {
-        let tasks = shared::schedule_store::load(
-            model_config.schedules.as_deref(),
-        );
+        let tasks = shared::schedule_store::load(model_config.schedules.as_deref());
         Self::start(&tasks, model_config, pool, tx).await
     }
 
@@ -28,15 +26,15 @@ impl Scheduler {
         pool: Arc<ModelPool>,
         tx: mpsc::UnboundedSender<String>,
     ) -> Result<Self> {
-        let job_scheduler = JobScheduler::new().await
+        let job_scheduler = JobScheduler::new()
+            .await
             .map_err(|e| anyhow::anyhow!("{:?}", e))?;
 
         let index = runtime_index::load();
         let context_preamble = index.build_context_preamble();
 
         for task in tasks {
-            let small_config = model_config
-                .resolve_model_ref(&task.model);
+            let small_config = model_config.resolve_model_ref(&task.model);
 
             let pool = pool.clone();
             let tx = tx.clone();
@@ -59,10 +57,7 @@ impl Scheduler {
 
                     let history = vec![];
                     match agent
-                        .chat(
-                            rig::completion::message::Message::user(&prompt),
-                            history,
-                        )
+                        .chat(rig::completion::message::Message::user(&prompt), history)
                         .await
                     {
                         Ok(response) => {
@@ -71,20 +66,27 @@ impl Scheduler {
                         Err(_) => {}
                     }
                 })
-            }).map_err(|e| anyhow::anyhow!("{:?}", e))?;
+            })
+            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
 
-            job_scheduler.add(job).await
+            job_scheduler
+                .add(job)
+                .await
                 .map_err(|e| anyhow::anyhow!("{:?}", e))?;
         }
 
-        job_scheduler.start().await
+        job_scheduler
+            .start()
+            .await
             .map_err(|e| anyhow::anyhow!("{:?}", e))?;
 
         Ok(Self { job_scheduler })
     }
 
     pub async fn stop(&mut self) -> Result<()> {
-        self.job_scheduler.shutdown().await
+        self.job_scheduler
+            .shutdown()
+            .await
             .map_err(|e| anyhow::anyhow!("{:?}", e))?;
         Ok(())
     }

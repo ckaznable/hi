@@ -1,6 +1,6 @@
 use std::io::{BufRead, Write};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -303,11 +303,7 @@ pub fn guided_init_config() -> Result<std::path::PathBuf> {
             "API key"
         };
         let key = prompt_with_default(&mut reader, &mut stdout, label, "")?;
-        if key.is_empty() {
-            None
-        } else {
-            Some(key)
-        }
+        if key.is_empty() { None } else { Some(key) }
     };
 
     let default_ctx = match provider {

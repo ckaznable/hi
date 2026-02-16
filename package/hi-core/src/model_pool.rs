@@ -1,4 +1,4 @@
-use crate::provider::{create_agent_from_small, ChatAgent};
+use crate::provider::{ChatAgent, create_agent_from_small};
 use anyhow::Result;
 use shared::config::SmallModelConfig;
 use std::collections::HashMap;

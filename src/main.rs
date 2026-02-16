@@ -116,34 +116,32 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Remote(_) => hi_remote::run_remote(cli.config).await,
-        Commands::Config(config_cmd) => {
-            match config_cmd.subcommand {
-                ConfigSubcommands::Validate(_) => {
-                    match hi_core::validate::validate_config(cli.config).await {
-                        Ok(success) => {
-                            println!("Config validation passed.");
-                            println!("  Provider: {}", success.provider);
-                            println!("  Model: {}", success.model);
-                            println!("  Response: {}", success.response_snippet);
-                            Ok(())
+        Commands::Config(config_cmd) => match config_cmd.subcommand {
+            ConfigSubcommands::Validate(_) => {
+                match hi_core::validate::validate_config(cli.config).await {
+                    Ok(success) => {
+                        println!("Config validation passed.");
+                        println!("  Provider: {}", success.provider);
+                        println!("  Model: {}", success.model);
+                        println!("  Response: {}", success.response_snippet);
+                        Ok(())
+                    }
+                    Err(err) => {
+                        eprintln!("Config validation failed: {}", err.kind);
+                        if let Some(ref provider) = err.provider {
+                            eprintln!("  Provider: {}", provider);
                         }
-                        Err(err) => {
-                            eprintln!("Config validation failed: {}", err.kind);
-                            if let Some(ref provider) = err.provider {
-                                eprintln!("  Provider: {}", provider);
-                            }
-                            if let Some(ref model) = err.model {
-                                eprintln!("  Model: {}", model);
-                            }
-                            eprintln!("  Error: {}", err.message);
-                            eprintln!();
-                            eprintln!("  Hint: {}", err.hint);
-                            std::process::exit(1);
+                        if let Some(ref model) = err.model {
+                            eprintln!("  Model: {}", model);
                         }
+                        eprintln!("  Error: {}", err.message);
+                        eprintln!();
+                        eprintln!("  Hint: {}", err.hint);
+                        std::process::exit(1);
                     }
                 }
             }
-        }
+        },
     }
 }
 

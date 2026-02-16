@@ -293,12 +293,16 @@ mod tests {
 
         assert_eq!(history.messages().len(), 11);
         assert_eq!(history.messages()[0].role, "system");
-        assert!(history.messages()[0]
-            .content
-            .contains("[Conversation Summary]"));
-        assert!(history.messages()[0]
-            .content
-            .contains("The user discussed topics 0-9."));
+        assert!(
+            history.messages()[0]
+                .content
+                .contains("[Conversation Summary]")
+        );
+        assert!(
+            history.messages()[0]
+                .content
+                .contains("The user discussed topics 0-9.")
+        );
         assert_eq!(history.messages()[1].content, "message 10");
         assert_eq!(history.messages()[10].content, "message 19");
     }

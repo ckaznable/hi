@@ -11,13 +11,14 @@ use shared::config::{HeartbeatConfig, ModelConfig};
 use shared::heartbeat_store::{self, TaskStatus};
 use shared::runtime_index;
 
-use crate::provider::{create_agent_from_parts, ChatAgent};
+use crate::provider::{ChatAgent, create_agent_from_parts};
 
 fn build_heartbeat_tools(heartbeat_md_path: PathBuf) -> Vec<Box<dyn ToolDyn>> {
     vec![
         Box::new(hi_tools::ReadFileTool) as Box<dyn ToolDyn>,
         Box::new(hi_tools::WriteFileTool),
-        Box::new(hi_tools::HeartbeatWriteTool::new(heartbeat_md_path)),
+        Box::new(hi_tools::HeartbeatWriteTool::new(heartbeat_md_path.clone())),
+        Box::new(hi_tools::HeartbeatEditTool::new(heartbeat_md_path)),
     ]
 }
 
@@ -153,17 +154,11 @@ fn build_task_prompt(md_path: &PathBuf) -> Option<String> {
 
     ledger.tasks[task_idx].status = TaskStatus::InProgress;
     if let Err(e) = heartbeat_store::save(md_path, &ledger) {
-        eprintln!(
-            "[heartbeat] Failed to persist in-progress status: {}",
-            e
-        );
+        eprintln!("[heartbeat] Failed to persist in-progress status: {}", e);
     }
 
     let task = &ledger.tasks[task_idx];
-    let mut prompt = format!(
-        "Execute heartbeat task '{}': {}",
-        task.id, task.title
-    );
+    let mut prompt = format!("Execute heartbeat task '{}': {}", task.id, task.title);
     if let Some(ref desc) = task.description {
         prompt.push_str(&format!("\n\nDetails:\n{}", desc));
     }
@@ -285,4 +280,3 @@ mod tests {
         assert!(!prompt.contains("Details:"));
     }
 }
-

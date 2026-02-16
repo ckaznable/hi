@@ -74,11 +74,7 @@ impl Tool for ReadFileTool {
 
         let selected = &lines[start..end];
 
-        let width = if end > 0 {
-            end.to_string().len()
-        } else {
-            1
-        };
+        let width = if end > 0 { end.to_string().len() } else { 1 };
         let numbered: Vec<String> = selected
             .iter()
             .enumerate()
@@ -192,7 +188,11 @@ mod tests {
         };
 
         let result = ReadFileTool.call(args).await.unwrap();
-        assert!(result.contains("[Showing lines 2-1 of 1]") || result.is_empty() || result.contains("[Showing lines"));
+        assert!(
+            result.contains("[Showing lines 2-1 of 1]")
+                || result.is_empty()
+                || result.contains("[Showing lines")
+        );
     }
 
     #[tokio::test]

@@ -65,8 +65,8 @@ impl Tool for HeartbeatWriteTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let new_status = TaskStatus::from_str(&args.new_status)
-            .map_err(|e| HeartbeatWriteError(e))?;
+        let new_status =
+            TaskStatus::from_str(&args.new_status).map_err(|e| HeartbeatWriteError(e))?;
 
         let mut ledger = heartbeat_store::load(&self.heartbeat_md_path)
             .map_err(|e| HeartbeatWriteError(e.to_string()))?;
@@ -105,10 +105,7 @@ impl Tool for HeartbeatWriteTool {
         heartbeat_store::save(&self.heartbeat_md_path, &ledger)
             .map_err(|e| HeartbeatWriteError(e.to_string()))?;
 
-        Ok(format!(
-            "Task '{}' updated to {}",
-            args.task_id, new_status
-        ))
+        Ok(format!("Task '{}' updated to {}", args.task_id, new_status))
     }
 }
 

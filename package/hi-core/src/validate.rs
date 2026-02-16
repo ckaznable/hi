@@ -53,14 +53,19 @@ pub struct ValidationSuccess {
 /// Validate the current config by loading it and sending a probe request.
 ///
 /// This is read-only: no config files, history, or other state is mutated.
-pub async fn validate_config(config_path: Option<PathBuf>) -> std::result::Result<ValidationSuccess, ValidationError> {
+pub async fn validate_config(
+    config_path: Option<PathBuf>,
+) -> std::result::Result<ValidationSuccess, ValidationError> {
     let config = match config_path {
         Some(ref p) => ModelConfig::load_from_path(p),
         None => ModelConfig::load(),
-    }.map_err(|e| ValidationError {
+    }
+    .map_err(|e| ValidationError {
         kind: ValidationErrorKind::ConfigLoad,
         message: e.to_string(),
-        hint: "Run `hi init` to create a starter config, then edit it with your provider and API key.".to_string(),
+        hint:
+            "Run `hi init` to create a starter config, then edit it with your provider and API key."
+                .to_string(),
         provider: None,
         model: None,
     })?;
@@ -101,11 +106,7 @@ fn truncate_response(response: &str, max_len: usize) -> String {
     }
 }
 
-fn classify_agent_build_error(
-    err: anyhow::Error,
-    provider: &str,
-    model: &str,
-) -> ValidationError {
+fn classify_agent_build_error(err: anyhow::Error, provider: &str, model: &str) -> ValidationError {
     let msg = err.to_string();
     let lower = msg.to_lowercase();
 
@@ -171,7 +172,11 @@ fn classify_error_text(lower: &str) -> (ValidationErrorKind, String) {
         );
     }
 
-    if lower.contains("model") && (lower.contains("not found") || lower.contains("not_found") || lower.contains("does not exist") || lower.contains("not available"))
+    if lower.contains("model")
+        && (lower.contains("not found")
+            || lower.contains("not_found")
+            || lower.contains("does not exist")
+            || lower.contains("not available"))
         || lower.contains("404") && lower.contains("model")
         || lower.contains("no such model")
         || lower.contains("invalid model")
@@ -250,8 +255,7 @@ mod tests {
 
     #[test]
     fn test_classify_model_does_not_exist() {
-        let (kind, _) =
-            classify_error_text("providerError: the model `gpt-5` does not exist");
+        let (kind, _) = classify_error_text("providerError: the model `gpt-5` does not exist");
         assert_eq!(kind, ValidationErrorKind::ModelNotAvailable);
     }
 
@@ -345,10 +349,7 @@ mod tests {
             ValidationErrorKind::ModelNotAvailable.to_string(),
             "model not available"
         );
-        assert_eq!(
-            ValidationErrorKind::Unknown.to_string(),
-            "unknown error"
-        );
+        assert_eq!(ValidationErrorKind::Unknown.to_string(), "unknown error");
     }
 
     #[test]
