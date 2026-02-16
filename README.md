@@ -27,6 +27,7 @@ A terminal LLM chat tool implemented in Rust, organized as a workspace:
   - Delta updates when context changes
 - Optional heartbeat task (fixed interval)
 - Optional cron scheduling (`tokio-cron-scheduler`)
+- MCP (Model Context Protocol) tool integration via stdio and HTTP transports
 - Telegram bot remote mode (via `hi-remote`, one independent session per chat)
 
 ## Not Supported Yet
@@ -67,17 +68,15 @@ hi remote
 
 ## Quick Start
 
-1. Generate the default config file:
+1. Run guided setup:
 
 ```bash
 hi init
 ```
 
-   This creates `config.json` at the standard config path (e.g. `~/.config/hi/config.json` on Linux).
+   This walks you through choosing a provider, model, API key, and context window, then writes `config.json` at the standard config path (e.g. `~/.config/hi/config.json` on Linux). Use `hi init --quick` to skip prompts and write a default template instead.
 
-2. Edit the generated config with your provider and API key.
-
-3. Run TUI:
+2. Run TUI:
 
 ```bash
 cargo run --features tui -- tui
@@ -100,17 +99,15 @@ hi remote
 
 ## Quick Start
 
-1. Generate the default config file:
+1. Run guided setup:
 
 ```bash
 hi init
 ```
 
-   This creates `config.json` at the standard config path (e.g. `~/.config/hi/config.json` on Linux).
+   This walks you through choosing a provider, model, API key, and context window, then writes `config.json` at the standard config path (e.g. `~/.config/hi/config.json` on Linux). Use `hi init --quick` to skip prompts and write a default template instead.
 
-2. Edit the generated config with your provider and API key.
-
-3. Run TUI:
+2. Run TUI:
 
 ```bash
 cargo run -p hi-cli --features tui -- tui
@@ -197,7 +194,7 @@ Example:
   },
   "heartbeat": {
     "enabled": true,
-    "interval_secs": 300,
+    "interval_secs": 1200,
     "model": "small",
     "prompt": "heartbeat check"
   },
@@ -275,6 +272,34 @@ When a qualifying release occurs, a structured log line is emitted to stderr:
 
 Non-qualifying releases log `action: skip`. Qualifying releases log `action: reclaim`.
 
+## Schedule Persistence
+
+Schedules can be persisted to `data_dir()/schedules.json` independently of the main config file. This allows runtime schedule management without modifying `config.json`.
+
+- On startup, `schedules.json` is loaded first. If it does not exist or is invalid, schedules fall back to the `schedules` array in `config.json`.
+- `schedules.json` is a JSON array of schedule objects.
+- Each schedule object requires `name`, `cron`, and `prompt`. `model` is optional.
+
+Example `schedules.json`:
+
+```json
+[
+  {
+    "name": "daily-summary",
+    "cron": "0 0 * * *",
+    "prompt": "Generate a daily summary."
+  },
+  {
+    "name": "hourly-check",
+    "cron": "0 * * * *",
+    "model": "small",
+    "prompt": "Check system status."
+  }
+]
+```
+
+Invalid entries (missing `name`, `cron`, or `prompt`) are silently skipped with a warning log.
+
 ## Telegram Remote Mode
 
 Extends LLM chat to Telegram through the Telegram Bot API. Each Telegram `chat_id` maintains an independent `ChatSession`.
@@ -301,7 +326,8 @@ Add `remote` section in `config.json`:
     "telegram": {
       "enabled": true,
       "bot_token": "123456:ABC-DEF...",
-      "poll_timeout_secs": 30
+      "poll_timeout_secs": 30,
+      "allowed_user_ids": [123456789]
     },
     "session": {
       "ttl_secs": 3600,
@@ -314,6 +340,7 @@ Add `remote` section in `config.json`:
 - `enabled`: enable Telegram remote mode
 - `bot_token`: bot token from [@BotFather](https://t.me/BotFather)
 - `poll_timeout_secs`: long polling timeout in seconds (default `30`)
+- `allowed_user_ids`: optional list of Telegram user IDs allowed to interact with the bot. When set, messages from unlisted users are silently dropped. When omitted, all users are allowed.
 - `session.ttl_secs`: idle session time-to-live in seconds (default `3600`). Sessions inactive longer than this are evicted on next access.
 - `session.max_sessions`: maximum concurrent sessions (default `100`). When the limit is reached, the oldest idle session is evicted to make room.
 
@@ -325,6 +352,36 @@ Add `remote` section in `config.json`:
 - When session count reaches `max_sessions`, the oldest idle session is evicted before creating a new one
 - Splits and sends replies automatically if output exceeds 4096 characters
 - Automatically waits and retries on Telegram rate limits (`429`)
+
+## MCP Tool Integration
+
+MCP (Model Context Protocol) servers can be connected to provide additional tools to the LLM agent. Both stdio (child process) and HTTP (Streamable HTTP) transports are supported.
+
+Create `mcp.json` in the config directory (e.g. `~/.config/hi/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/projects"],
+      "env": {
+        "NODE_ENV": "production"
+      }
+    },
+    "remote-tools": {
+      "url": "http://localhost:8080/mcp"
+    }
+  }
+}
+```
+
+- `command` + `args`: stdio transport — spawns a child process
+- `url`: HTTP transport — connects to a Streamable HTTP endpoint
+- `env`: optional environment variables for stdio servers
+- Each server must have either `command` or `url` (not both)
+- Tools discovered from MCP servers are automatically available to the agent
+- Servers that fail to connect are skipped with a warning (partial failure does not block startup)
 
 ## Skills Usage
 
@@ -345,12 +402,15 @@ You are a senior Rust engineer focusing on correctness and performance.
 
 - Type message and press Enter to send
 - `/reset`: clear current history
+- `/model`: switch back to primary model
+- `/model small`: switch to small model
+- `/model primary`: switch back to primary model
 - `/quit` or `/exit`: quit
 - `Esc` or `Ctrl+C`: quit
 
 ## CLI Subcommands
 
-- `init`: create a starter config template at the default config path
+- `init`: guided interactive setup — prompts for provider, model, API key, and context window. Use `--quick` to skip prompts and write a default template.
 - `tui`: start interactive terminal chat UI (requires `--features tui` at build time)
 - `remote`: start Telegram bot long-polling mode
 - `config validate`: validate config by sending a test message to the configured LLM provider

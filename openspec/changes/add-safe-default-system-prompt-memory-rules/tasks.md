@@ -1,0 +1,6 @@
+- [x] Add `DEFAULT_PREAMBLE` constant in `session.rs`
+- [x] Add `fn effective_preamble(&self) -> &str` to `ChatSession`
+- [x] Update `ChatSession::new()` to use `effective_preamble` when building preamble
+- [x] Update `send_message()` to use `effective_preamble()` for context injection
+- [x] Update `send_message_streaming()` to use `effective_preamble()` for context injection
+- [x] Compaction protection verified: preamble re-injected after `mark_dirty()` automatically

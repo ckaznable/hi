@@ -12,7 +12,7 @@ use rig::tool::ToolDyn;
 use shared::config::{ModelConfig, Provider, SmallModelConfig};
 use tokio::sync::mpsc;
 
-use hi_tools::{BashTool, ListFilesTool, ReadFileTool, ReadSkillsTool, SkillSummary, WriteFileTool};
+use hi_tools::{BashTool, ListFilesTool, MemoryTool, ReadFileTool, ReadSkillsTool, ScheduleViewTool, SkillSummary, WriteFileTool};
 
 pub const STREAM_CHANNEL_CAPACITY: usize = 256;
 
@@ -80,12 +80,20 @@ impl ChatAgent {
 }
 
 fn build_tools(skill_summaries: Vec<SkillSummary>) -> Vec<Box<dyn ToolDyn>> {
+    let memory_path = shared::paths::data_dir()
+        .map(|d| d.join("memory.md"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("memory.md"));
+    let schedules_path = shared::paths::data_dir()
+        .map(|d| d.join("schedules.json"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("schedules.json"));
     vec![
         Box::new(BashTool) as Box<dyn ToolDyn>,
         Box::new(ListFilesTool),
         Box::new(ReadFileTool),
         Box::new(WriteFileTool),
         Box::new(ReadSkillsTool::new(skill_summaries)),
+        Box::new(MemoryTool::new(memory_path)),
+        Box::new(ScheduleViewTool::new(schedules_path)),
     ]
 }
 
@@ -93,8 +101,10 @@ pub fn create_agent(
     config: &ModelConfig,
     preamble: Option<&str>,
     skill_summaries: Vec<SkillSummary>,
+    extra_tools: Vec<Box<dyn ToolDyn>>,
 ) -> Result<ChatAgent> {
-    let tools = build_tools(skill_summaries);
+    let mut tools = build_tools(skill_summaries);
+    tools.extend(extra_tools);
     create_agent_from_parts(&config.provider, &config.model, &config.api_key, &config.api_base, preamble, tools)
 }
 
@@ -103,6 +113,15 @@ pub fn create_agent_from_small(
     preamble: Option<&str>,
 ) -> Result<ChatAgent> {
     create_agent_from_parts(&config.provider, &config.model, &config.api_key, &config.api_base, preamble, vec![])
+}
+
+pub fn create_agent_from_small_with_tools(
+    config: &SmallModelConfig,
+    preamble: Option<&str>,
+    skill_summaries: Vec<SkillSummary>,
+) -> Result<ChatAgent> {
+    let tools = build_tools(skill_summaries);
+    create_agent_from_parts(&config.provider, &config.model, &config.api_key, &config.api_base, preamble, tools)
 }
 
 pub(crate) fn create_agent_from_parts(

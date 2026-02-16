@@ -60,10 +60,12 @@ argh = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "process", "fs", "time", "signal"] }
-rig-core = { git = "https://github.com/0xPlaygrounds/rig.git", rev = "dc45224a47108c1d3bdbb53b744b1964434ae549"}
+rig-core = { git = "https://github.com/0xPlaygrounds/rig.git", rev = "dc45224a47108c1d3bdbb53b744b1964434ae549", features = ["rmcp"]}
+rmcp = { version = "0.13", features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
 reqwest = { version = "0.13" }
+tempfile = "3"
 

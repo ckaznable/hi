@@ -1,0 +1,5 @@
+- [x] 1. Remove `ModelPool` dependency from `HeartbeatSystem::start()` — no longer takes `pool: Arc<ModelPool>`.
+- [x] 2. Add `build_heartbeat_tools()` helper that returns `Vec<Box<dyn ToolDyn>>` with `ReadFileTool` + `WriteFileTool`.
+- [x] 3. Add `create_heartbeat_agent()` helper that resolves model ref and calls `create_agent_from_parts` with heartbeat tools.
+- [x] 4. Update `HeartbeatSystem::start()` to use `create_heartbeat_agent()` directly instead of pool.
+- [x] 5. Verify `cargo check -p hi-core` passes with refactored heartbeat module.

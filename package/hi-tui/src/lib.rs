@@ -16,6 +16,7 @@ use tokio::sync::mpsc;
 enum SessionCmd {
     Send(String),
     Reset,
+    SwitchModel(String),
 }
 
 enum SessionReply {
@@ -23,6 +24,7 @@ enum SessionReply {
     StreamDone,
     Error(String),
     ResetDone,
+    ModelSwitched(String),
 }
 
 struct App {
@@ -128,7 +130,13 @@ async fn run(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     config: shared::config::ModelConfig,
 ) -> Result<()> {
-    let mut session = hi_core::session::ChatSession::new(config)?;
+    let mut session = hi_core::session::ChatSession::new(config).await?;
+
+    let skill_list: Vec<(String, String)> = session
+        .skills()
+        .iter()
+        .map(|s| (s.name.clone(), s.description.clone()))
+        .collect();
 
     let initial_messages: Vec<(String, String)> = session
         .history()
@@ -163,6 +171,21 @@ async fn run(
                 SessionCmd::Reset => {
                     let _ = session.reset();
                     let _ = reply_tx.send(SessionReply::ResetDone);
+                }
+                SessionCmd::SwitchModel(target) => {
+                    let result = match target.as_str() {
+                        "small" => session.switch_to_small_model(),
+                        "primary" | "" => session.switch_to_primary_model(),
+                        _ => Err(anyhow::anyhow!("Unknown model target: {target}. Use 'small' or 'primary'.")),
+                    };
+                    match result {
+                        Ok(name) => {
+                            let _ = reply_tx.send(SessionReply::ModelSwitched(name));
+                        }
+                        Err(e) => {
+                            let _ = reply_tx.send(SessionReply::Error(format!("{e}")));
+                        }
+                    }
                 }
             }
         }
@@ -200,6 +223,10 @@ async fn run(
                 SessionReply::ResetDone => {
                     app.messages.clear();
                     app.streaming_buffer.clear();
+                    app.waiting = false;
+                }
+                SessionReply::ModelSwitched(name) => {
+                    app.messages.push(("system".to_string(), format!("Switched to model: {name}")));
                     app.waiting = false;
                 }
             }
@@ -241,6 +268,27 @@ async fn run(
                         if trimmed == "/reset" {
                             app.waiting = true;
                             let _ = cmd_tx.send(SessionCmd::Reset);
+                            continue;
+                        }
+
+                        if trimmed == "/model" || trimmed.starts_with("/model ") {
+                            let target = trimmed.strip_prefix("/model").unwrap_or("").trim().to_string();
+                            app.waiting = true;
+                            let _ = cmd_tx.send(SessionCmd::SwitchModel(target));
+                            continue;
+                        }
+
+                        if trimmed == "/skills" {
+                            let msg = if skill_list.is_empty() {
+                                "No skills loaded.".to_string()
+                            } else {
+                                let mut lines = vec!["Loaded skills:".to_string()];
+                                for (name, desc) in &skill_list {
+                                    lines.push(format!("• {name} — {desc}"));
+                                }
+                                lines.join("\n")
+                            };
+                            app.messages.push(("system".to_string(), msg));
                             continue;
                         }
 

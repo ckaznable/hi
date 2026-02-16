@@ -22,7 +22,7 @@
 ## 4. Verify and Test
 
 - [x] 4.1 Run `cargo check --workspace` to verify compilation
-- [ ] 4.2 Test that log files are created in `data_dir()/logs/`
-- [ ] 4.3 Test that error/warn messages appear in log file
-- [ ] 4.4 Test that `RUST_LOG=debug` enables debug output to stderr
+- [x] 4.2 Test that log files are created in `data_dir()/logs/`
+- [x] 4.3 Test that error/warn messages appear in log file
+- [x] 4.4 Test that `RUST_LOG=debug` enables debug output to stderr
 - [x] 4.5 Run existing tests to ensure no regressions

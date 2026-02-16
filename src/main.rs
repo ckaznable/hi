@@ -25,10 +25,14 @@ enum Commands {
     Config(ConfigCommand),
 }
 
-/// Create a starter config template at the default config path
+/// Create a starter config via guided setup or quick template
 #[derive(FromArgs, Debug, PartialEq)]
 #[argh(subcommand, name = "init")]
-struct InitCommand {}
+struct InitCommand {
+    /// skip prompts and write a default template
+    #[argh(switch, long = "quick")]
+    quick: bool,
+}
 
 /// Start interactive terminal chat UI
 #[derive(FromArgs, Debug, PartialEq)]
@@ -79,8 +83,13 @@ async fn main() -> Result<()> {
     });
 
     match cli.command {
-        Commands::Init(_) => {
-            match shared::config::init_config() {
+        Commands::Init(init_cmd) => {
+            let result = if init_cmd.quick {
+                shared::config::init_config()
+            } else {
+                shared::config::guided_init_config()
+            };
+            match result {
                 Ok(path) => {
                     println!("Config template created at: {}", path.display());
                     Ok(())
@@ -159,8 +168,14 @@ mod tests {
     #[test]
     fn test_parse_init_command() {
         let cli = Cli::from_args(&["hi"], &["init"]).unwrap();
-        assert_eq!(cli.command, Commands::Init(InitCommand {}));
+        assert_eq!(cli.command, Commands::Init(InitCommand { quick: false }));
         assert_eq!(cli.config, None);
+    }
+
+    #[test]
+    fn test_parse_init_quick_flag() {
+        let cli = Cli::from_args(&["hi"], &["init", "--quick"]).unwrap();
+        assert_eq!(cli.command, Commands::Init(InitCommand { quick: true }));
     }
 
     #[test]

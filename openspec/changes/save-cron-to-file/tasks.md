@@ -14,6 +14,6 @@
 
 ## 3. Documentation and Migration
 
-- [ ] 3.1 Update README.md with new schedules.json location and format
-- [ ] 3.2 Add example schedules.json file content to documentation
-- [ ] 3.3 Test the complete flow: create schedules.json, start app, verify schedules run
+- [x] 3.1 Update README.md with new schedules.json location and format
+- [x] 3.2 Add example schedules.json file content to documentation
+- [x] 3.3 Test the complete flow: create schedules.json, start app, verify schedules run

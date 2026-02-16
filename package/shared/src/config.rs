@@ -1,3 +1,5 @@
+use std::io::{BufRead, Write};
+
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
@@ -48,20 +50,24 @@ pub struct SmallModelConfig {
     pub context_window: usize,
 }
 
+fn default_heartbeat_model() -> Option<ModelRef> {
+    Some(ModelRef::Named("small".to_string()))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeartbeatConfig {
     #[serde(default)]
     pub enabled: bool,
     #[serde(default = "default_interval_secs")]
     pub interval_secs: u64,
-    #[serde(default)]
+    #[serde(default = "default_heartbeat_model")]
     pub model: Option<ModelRef>,
     #[serde(default)]
     pub prompt: Option<String>,
 }
 
 fn default_interval_secs() -> u64 {
-    300
+    1200
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,6 +120,8 @@ pub struct TelegramConfig {
     pub bot_token: String,
     #[serde(default = "default_poll_timeout_secs")]
     pub poll_timeout_secs: Option<u32>,
+    #[serde(default)]
+    pub allowed_user_ids: Option<Vec<i64>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -136,6 +144,24 @@ pub struct RemoteConfig {
     pub telegram: Option<TelegramConfig>,
     #[serde(default)]
     pub session: Option<SessionConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerConfig {
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Option<Vec<String>>,
+    #[serde(default)]
+    pub env: Option<std::collections::HashMap<String, String>>,
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpConfig {
+    #[serde(default, rename = "mcpServers")]
+    pub mcp_servers: std::collections::HashMap<String, McpServerConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,6 +235,161 @@ fn write_config_template(path: &std::path::Path) -> Result<()> {
         .with_context(|| format!("Failed to write config template to: {}", path.display()))?;
 
     Ok(())
+}
+
+/// Interactive guided setup: prompts the user for provider, model, API key, etc.
+/// and writes a customized config.json.
+///
+/// Returns the resolved path on success.
+/// Fails if the config file already exists or if a filesystem/IO error occurs.
+pub fn guided_init_config() -> Result<std::path::PathBuf> {
+    let path = config_path()?;
+    if path.exists() {
+        bail!(
+            "Config file already exists at: {}\nRemove it first if you want to regenerate.",
+            path.display()
+        );
+    }
+
+    let stdin = std::io::stdin();
+    let mut reader = stdin.lock();
+    let mut stdout = std::io::stdout();
+
+    println!("hi — guided setup\n");
+
+    println!("Available providers:");
+    println!("  1) openai");
+    println!("  2) openai-compatible");
+    println!("  3) anthropic");
+    println!("  4) gemini");
+    println!("  5) ollama");
+    let provider_str = prompt_with_default(&mut reader, &mut stdout, "Provider [1]", "1")?;
+    let (provider, provider_name) = match provider_str.trim() {
+        "1" | "openai" => (Provider::OpenAI, "openai"),
+        "2" | "openai-compatible" => (Provider::OpenAICompatible, "openai-compatible"),
+        "3" | "anthropic" => (Provider::Anthropic, "anthropic"),
+        "4" | "gemini" => (Provider::Gemini, "gemini"),
+        "5" | "ollama" => (Provider::Ollama, "ollama"),
+        other => bail!("Unknown provider: {other}"),
+    };
+
+    let default_model = match provider {
+        Provider::OpenAI => "gpt-4o",
+        Provider::OpenAICompatible => "gpt-4o",
+        Provider::Anthropic => "claude-sonnet-4-20250514",
+        Provider::Gemini => "gemini-2.5-flash",
+        Provider::Ollama => "qwen2.5:14b",
+    };
+    let model = prompt_with_default(
+        &mut reader,
+        &mut stdout,
+        &format!("Model [{default_model}]"),
+        default_model,
+    )?;
+
+    let api_base = if provider == Provider::OpenAICompatible {
+        let base = prompt_required(&mut reader, &mut stdout, "API base URL (required)")?;
+        Some(base)
+    } else {
+        None
+    };
+
+    let api_key = if provider == Provider::Ollama {
+        None
+    } else {
+        let label = if provider == Provider::OpenAICompatible {
+            "API key (optional, press Enter to skip)"
+        } else {
+            "API key"
+        };
+        let key = prompt_with_default(&mut reader, &mut stdout, label, "")?;
+        if key.is_empty() {
+            None
+        } else {
+            Some(key)
+        }
+    };
+
+    let default_ctx = match provider {
+        Provider::OpenAI => "128000",
+        Provider::OpenAICompatible => "128000",
+        Provider::Anthropic => "200000",
+        Provider::Gemini => "1048576",
+        Provider::Ollama => "32000",
+    };
+    let ctx_str = prompt_with_default(
+        &mut reader,
+        &mut stdout,
+        &format!("Context window [{default_ctx}]"),
+        default_ctx,
+    )?;
+    let context_window: usize = ctx_str
+        .parse()
+        .with_context(|| format!("Invalid context window: {ctx_str}"))?;
+
+    let mut obj = serde_json::Map::new();
+    obj.insert(
+        "provider".to_string(),
+        serde_json::Value::String(provider_name.to_string()),
+    );
+    obj.insert("model".to_string(), serde_json::Value::String(model));
+    if let Some(key) = api_key {
+        obj.insert("api_key".to_string(), serde_json::Value::String(key));
+    }
+    if let Some(base) = api_base {
+        obj.insert("api_base".to_string(), serde_json::Value::String(base));
+    }
+    obj.insert(
+        "context_window".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(context_window)),
+    );
+
+    let json = serde_json::to_string_pretty(&obj).context("Failed to serialize config")?;
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create config directory: {}", parent.display()))?;
+    }
+    std::fs::write(&path, format!("{json}\n"))
+        .with_context(|| format!("Failed to write config to: {}", path.display()))?;
+
+    Ok(path)
+}
+
+fn prompt_with_default(
+    reader: &mut impl BufRead,
+    stdout: &mut impl Write,
+    label: &str,
+    default: &str,
+) -> Result<String> {
+    write!(stdout, "{label}: ")?;
+    stdout.flush()?;
+    let mut line = String::new();
+    reader.read_line(&mut line)?;
+    let trimmed = line.trim().to_string();
+    if trimmed.is_empty() {
+        Ok(default.to_string())
+    } else {
+        Ok(trimmed)
+    }
+}
+
+fn prompt_required(
+    reader: &mut impl BufRead,
+    stdout: &mut impl Write,
+    label: &str,
+) -> Result<String> {
+    loop {
+        write!(stdout, "{label}: ")?;
+        stdout.flush()?;
+        let mut line = String::new();
+        reader.read_line(&mut line)?;
+        let trimmed = line.trim().to_string();
+        if !trimmed.is_empty() {
+            return Ok(trimmed);
+        }
+        println!("  (value required)");
+    }
 }
 
 impl ModelConfig {
@@ -860,5 +1041,104 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("api_key"));
+    }
+
+    #[test]
+    fn test_heartbeat_defaults_interval_1200() {
+        let json = r#"{
+            "provider": "openai",
+            "model": "gpt-4o",
+            "api_key": "sk-test",
+            "context_window": 128000,
+            "heartbeat": {
+                "enabled": true
+            }
+        }"#;
+        let config: ModelConfig = serde_json::from_str(json).unwrap();
+        let hb = config.heartbeat.as_ref().unwrap();
+        assert_eq!(hb.interval_secs, 1200);
+    }
+
+    #[test]
+    fn test_heartbeat_defaults_to_small_model() {
+        let json = r#"{
+            "provider": "openai",
+            "model": "gpt-4o",
+            "api_key": "sk-test",
+            "context_window": 128000,
+            "heartbeat": {
+                "enabled": true
+            }
+        }"#;
+        let config: ModelConfig = serde_json::from_str(json).unwrap();
+        let hb = config.heartbeat.as_ref().unwrap();
+        assert_eq!(hb.model, Some(ModelRef::Named("small".to_string())));
+    }
+
+    #[test]
+    fn test_telegram_allowed_user_ids() {
+        let json = r#"{
+            "provider": "openai",
+            "model": "gpt-4o",
+            "api_key": "sk-test",
+            "context_window": 128000,
+            "remote": {
+                "telegram": {
+                    "enabled": true,
+                    "bot_token": "123456:ABC",
+                    "allowed_user_ids": [111, 222, 333]
+                }
+            }
+        }"#;
+        let config: ModelConfig = serde_json::from_str(json).unwrap();
+        let telegram = config.remote.as_ref().unwrap().telegram.as_ref().unwrap();
+        assert_eq!(telegram.allowed_user_ids, Some(vec![111, 222, 333]));
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_telegram_no_allowed_user_ids_means_open() {
+        let json = r#"{
+            "provider": "openai",
+            "model": "gpt-4o",
+            "api_key": "sk-test",
+            "context_window": 128000,
+            "remote": {
+                "telegram": {
+                    "enabled": true,
+                    "bot_token": "123456:ABC"
+                }
+            }
+        }"#;
+        let config: ModelConfig = serde_json::from_str(json).unwrap();
+        let telegram = config.remote.as_ref().unwrap().telegram.as_ref().unwrap();
+        assert!(telegram.allowed_user_ids.is_none());
+    }
+
+    #[test]
+    fn test_prompt_with_default_uses_input() {
+        let input = b"anthropic\n";
+        let mut reader = &input[..];
+        let mut out = Vec::new();
+        let result = prompt_with_default(&mut reader, &mut out, "Provider [1]", "1").unwrap();
+        assert_eq!(result, "anthropic");
+    }
+
+    #[test]
+    fn test_prompt_with_default_uses_default_on_empty() {
+        let input = b"\n";
+        let mut reader = &input[..];
+        let mut out = Vec::new();
+        let result = prompt_with_default(&mut reader, &mut out, "Provider [1]", "1").unwrap();
+        assert_eq!(result, "1");
+    }
+
+    #[test]
+    fn test_prompt_required_returns_value() {
+        let input = b"http://localhost:8080\n";
+        let mut reader = &input[..];
+        let mut out = Vec::new();
+        let result = prompt_required(&mut reader, &mut out, "API base URL").unwrap();
+        assert_eq!(result, "http://localhost:8080");
     }
 }

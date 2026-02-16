@@ -1,0 +1,5 @@
+- [x] Change `default_interval_secs()` from 300 to 1200 (20 minutes)
+- [x] Add `default_heartbeat_model()` returning `Some(ModelRef::Named("small"))` with serde default on `HeartbeatConfig.model`
+- [x] Update README heartbeat example to show `interval_secs: 1200`
+- [x] Add test `test_heartbeat_defaults_interval_1200`
+- [x] Add test `test_heartbeat_defaults_to_small_model`

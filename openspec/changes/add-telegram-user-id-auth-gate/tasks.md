@@ -1,0 +1,5 @@
+- [x] Add `allowed_user_ids: Option<Vec<i64>>` to `TelegramConfig` in `shared/src/config.rs`
+- [x] Add auth gate in `telegram.rs` `run_polling_loop` checking `message.from.id` against `allowed_user_ids`
+- [x] Update README with `allowed_user_ids` config docs and example
+- [x] Add test `test_telegram_allowed_user_ids`
+- [x] Add test `test_telegram_no_allowed_user_ids_means_open`

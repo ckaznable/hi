@@ -77,7 +77,7 @@ impl SessionManager {
         }
 
         // Create new session
-        let session = ChatSession::new(self.config.clone())?;
+        let session = ChatSession::new(self.config.clone()).await?;
         let session = Arc::new(Mutex::new(session));
         sessions.insert(
             chat_id,
@@ -89,6 +89,10 @@ impl SessionManager {
         debug!(chat_id, "Created session");
 
         Ok(session)
+    }
+
+    pub fn config(&self) -> &ModelConfig {
+        &self.config
     }
 
     #[allow(dead_code)]

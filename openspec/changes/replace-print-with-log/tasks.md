@@ -1,36 +1,19 @@
-## 1. Setup Dependencies
+## 1. Assess Current State
 
-- [ ] 1.1 Add `log` and `env_logger` dependencies to workspace root `Cargo.toml`
-- [ ] 1.2 Add `log_level` field to Config struct in `package/shared/src/config.rs`
+- [x] 1.1 Audit remaining println!/eprintln! across the workspace
+- [x] 1.2 Classify each call site as user-facing CLI output vs internal logging
 
-## 2. Initialize Logger
+## 2. Convert Internal Logging to Tracing
 
-- [ ] 2.1 Add logger initialization in `src/main.rs` before any other code
-- [ ] 2.2 Make logger respect RUST_LOG env variable and config log_level
+- [x] 2.1 Confirm all non-user-facing eprintln! already converted to tracing macros (done by add-log-crate)
+- [x] 2.2 Keep user-facing println! in src/main.rs (init success, config validate output)
+- [x] 2.3 Keep user-facing eprintln! in src/main.rs (TUI feature gate, config validate errors)
+- [x] 2.4 Keep pre-init fallback eprintln! in shared/src/logging.rs (fires before tracing is initialized)
 
-## 3. Migrate shared Package
+## 3. Verification
 
-- [ ] 3.1 Add `log` dependency to `package/shared/Cargo.toml`
-- [ ] 3.2 Replace eprintln! in `package/shared/src/memory.rs` with log macros
+- [x] 3.1 cargo check --workspace passes
+- [x] 3.2 cargo test --workspace passes
+- [x] 3.3 No non-user-facing println!/eprintln! remains in production code
 
-## 4. Migrate hi-core Package
-
-- [ ] 4.1 Add `log` dependency to `package/hi-core/Cargo.toml`
-- [ ] 4.2 Replace eprintln! in `package/hi-core/src/provider.rs` with log macros
-
-## 5. Migrate hi-remote Package
-
-- [ ] 5.1 Add `log` dependency to `package/hi-remote/Cargo.toml`
-- [ ] 5.2 Replace eprintln! in `package/hi-remote/src/telegram.rs` with log macros
-- [ ] 5.3 Replace eprintln! in `package/hi-remote/src/session_manager.rs` with log macros
-
-## 6. Migrate main.rs
-
-- [ ] 6.1 Replace println!/eprintln! in `src/main.rs` with log macros
-- [ ] 6.2 Add appropriate log level annotations to each call site
-
-## 7. Verification
-
-- [ ] 7.1 Run `cargo check --workspace` to verify no compilation errors
-- [ ] 7.2 Run `cargo test --workspace` to ensure all tests pass
-- [ ] 7.3 Verify log output format matches specification
+Note: The original tasks referenced log+env_logger, but the codebase uses tracing+tracing-subscriber (added by add-log-crate). This change is superseded — all actionable conversions were completed by add-log-crate.

@@ -141,4 +141,35 @@ mod tests {
         assert_eq!(loaded[0].name, "test");
         assert_eq!(loaded[0].prompt, "test prompt");
     }
+
+    #[test]
+    fn test_roundtrip_save_load_preserves_all_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("schedules.json");
+
+        let schedules = vec![
+            ScheduleTaskConfig {
+                name: "with-model".to_string(),
+                cron: "*/5 * * * *".to_string(),
+                model: Some(crate::config::ModelRef::Named("small".to_string())),
+                prompt: "check status".to_string(),
+            },
+            make_schedule("no-model", "0 0 * * *", "daily task"),
+        ];
+
+        let content = serde_json::to_string_pretty(&schedules).unwrap();
+        std::fs::write(&path, &content).unwrap();
+
+        let loaded: Vec<ScheduleTaskConfig> =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].name, "with-model");
+        assert_eq!(
+            loaded[0].model,
+            Some(crate::config::ModelRef::Named("small".to_string()))
+        );
+        assert_eq!(loaded[1].name, "no-model");
+        assert_eq!(loaded[1].model, None);
+    }
 }

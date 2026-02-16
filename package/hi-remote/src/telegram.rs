@@ -19,6 +19,7 @@ const MAX_RETRY_ATTEMPTS: u32 = 3;
 pub async fn run_polling_loop(config: &ModelConfig, telegram_config: &TelegramConfig) -> Result<()> {
     let bot = Bot::new(&telegram_config.bot_token);
     let session_manager = Arc::new(SessionManager::new(config.clone()));
+    let allowed_user_ids = telegram_config.allowed_user_ids.clone();
 
     let timeout = telegram_config.poll_timeout_secs.unwrap_or(30);
     let mut offset: i32 = 0;
@@ -38,6 +39,24 @@ pub async fn run_polling_loop(config: &ModelConfig, telegram_config: &TelegramCo
                     offset = update.id.0 as i32 + 1;
 
                     if let UpdateKind::Message(message) = update.kind {
+                        if let Some(ref allowed) = allowed_user_ids {
+                            let sender_id = message
+                                .from
+                                .as_ref()
+                                .map(|u| u.id.0 as i64);
+                            match sender_id {
+                                Some(id) if allowed.contains(&id) => {}
+                                _ => {
+                                    warn!(
+                                        chat_id = message.chat.id.0,
+                                        sender_id = ?sender_id,
+                                        "Rejected message from unauthorized user"
+                                    );
+                                    continue;
+                                }
+                            }
+                        }
+
                         let text = match &message.kind {
                             MessageKind::Common(common) => match &common.media_kind {
                                 MediaKind::Text(text_media) => text_media.text.clone(),
@@ -64,7 +83,6 @@ pub async fn run_polling_loop(config: &ModelConfig, telegram_config: &TelegramCo
                 }
             }
             Err(RequestError::Network(_)) => {
-                // Network/timeout errors are expected during long polling — silently retry
                 continue;
             }
             Err(e) => {
@@ -131,7 +149,10 @@ async fn handle_command(
     bot: &Bot,
     session_manager: &SessionManager,
 ) -> Result<()> {
-    let cmd = command.split_whitespace().next().unwrap_or("");
+    let (cmd, args) = match command.split_once(char::is_whitespace) {
+        Some((c, a)) => (c, a.trim()),
+        None => (command, ""),
+    };
 
     let reply = match cmd {
         "compact" => match session_manager.compact_session(chat_id).await {
@@ -144,10 +165,20 @@ async fn handle_command(
             Ok(false) => "No active conversation to reset.".to_string(),
             Err(e) => format!("Failed to reset: {e}"),
         },
+        "cron" => handle_cron_command(args, session_manager.config()),
+        "heartbeat" => format_heartbeat(session_manager.config().heartbeat.as_ref()),
+        "mcp" => format_mcp_servers(&shared::mcp_store::load()),
+        "skills" => format_skills(),
         "help" => concat!(
             "Available commands:\n",
             "/compact - Compact chat history\n",
             "/new - Start a new conversation\n",
+            "/cron - List scheduled tasks\n",
+            "/cron add <name> <cron> <prompt> - Add a schedule\n",
+            "/cron remove <name> - Remove a schedule\n",
+            "/heartbeat - Show heartbeat status\n",
+            "/mcp - List MCP servers\n",
+            "/skills - List loaded skills\n",
             "/help - Show this help message",
         ).to_string(),
         _ => format!("Unknown command: /{cmd}\nUse /help to see available commands."),
@@ -155,6 +186,157 @@ async fn handle_command(
 
     send_message_with_retry(bot, chat_id, &reply).await?;
     Ok(())
+}
+
+fn handle_cron_command(args: &str, config: &ModelConfig) -> String {
+    if args.is_empty() {
+        return format_schedules(&shared::schedule_store::load(config.schedules.as_deref()));
+    }
+
+    let (sub, sub_args) = match args.split_once(char::is_whitespace) {
+        Some((s, a)) => (s, a.trim()),
+        None => (args, ""),
+    };
+
+    match sub {
+        "add" => handle_cron_add(sub_args, config),
+        "remove" => handle_cron_remove(sub_args, config),
+        _ => "Usage:\n/cron - List schedules\n/cron add <name> <cron> <prompt>\n/cron remove <name>".to_string(),
+    }
+}
+
+fn handle_cron_add(args: &str, config: &ModelConfig) -> String {
+    let parts: Vec<&str> = args.splitn(7, char::is_whitespace).collect();
+    if parts.len() < 7 {
+        return "Usage: /cron add <name> <min> <hour> <dom> <mon> <dow> <prompt>\nExample: /cron add daily-summary 0 0 * * * Generate a daily summary.".to_string();
+    }
+
+    let name = parts[0];
+    let cron_expr = format!("{} {} {} {} {}", parts[1], parts[2], parts[3], parts[4], parts[5]);
+    let prompt = parts[6].trim();
+
+    if name.is_empty() || prompt.is_empty() {
+        return "Name and prompt must not be empty.".to_string();
+    }
+
+    let mut schedules = shared::schedule_store::load(config.schedules.as_deref());
+
+    if schedules.iter().any(|s| s.name == name) {
+        return format!("Schedule '{name}' already exists. Remove it first to replace.");
+    }
+
+    schedules.push(shared::config::ScheduleTaskConfig {
+        name: name.to_string(),
+        cron: cron_expr.clone(),
+        model: None,
+        prompt: prompt.to_string(),
+    });
+
+    match shared::schedule_store::save(&schedules) {
+        Ok(()) => format!("✓ Added schedule '{name}' ({cron_expr}).\nNote: restart required for schedule to take effect."),
+        Err(e) => format!("Failed to save schedule: {e}"),
+    }
+}
+
+fn handle_cron_remove(args: &str, config: &ModelConfig) -> String {
+    let name = args.split_whitespace().next().unwrap_or("");
+    if name.is_empty() {
+        return "Usage: /cron remove <name>".to_string();
+    }
+
+    let mut schedules = shared::schedule_store::load(config.schedules.as_deref());
+    let before = schedules.len();
+    schedules.retain(|s| s.name != name);
+
+    if schedules.len() == before {
+        return format!("Not found: {name}");
+    }
+
+    match shared::schedule_store::save(&schedules) {
+        Ok(()) => format!("✓ Removed schedule '{name}'.\nNote: restart required for change to take effect."),
+        Err(e) => format!("Failed to save: {e}"),
+    }
+}
+
+fn format_schedules(schedules: &[shared::config::ScheduleTaskConfig]) -> String {
+    if schedules.is_empty() {
+        return "No schedules configured.".to_string();
+    }
+
+    let mut lines = vec!["Schedules:".to_string()];
+    for s in schedules {
+        let model = match &s.model {
+            Some(shared::config::ModelRef::Named(n)) => n.clone(),
+            Some(shared::config::ModelRef::Inline(c)) => format!("{}/{}", c.provider, c.model),
+            None => "default".to_string(),
+        };
+        let prompt_preview = if s.prompt.len() > 50 {
+            format!("{}…", &s.prompt[..50])
+        } else {
+            s.prompt.clone()
+        };
+        lines.push(format!("• {} | {} | model={} | {}", s.name, s.cron, model, prompt_preview));
+    }
+    lines.join("\n")
+}
+
+fn format_heartbeat(config: Option<&shared::config::HeartbeatConfig>) -> String {
+    let Some(hb) = config else {
+        return "Heartbeat: not configured.".to_string();
+    };
+
+    let model = match &hb.model {
+        Some(shared::config::ModelRef::Named(n)) => n.clone(),
+        Some(shared::config::ModelRef::Inline(c)) => format!("{}/{}", c.provider, c.model),
+        None => "default".to_string(),
+    };
+    let prompt = hb.prompt.as_deref().unwrap_or("(none)");
+
+    format!(
+        "Heartbeat:\n• enabled: {}\n• interval: {}s\n• model: {}\n• prompt: {}",
+        hb.enabled, hb.interval_secs, model, prompt
+    )
+}
+
+fn format_mcp_servers(config: &shared::config::McpConfig) -> String {
+    if config.mcp_servers.is_empty() {
+        return "MCP: no servers configured.".to_string();
+    }
+
+    let mut lines = vec!["MCP servers:".to_string()];
+    let mut names: Vec<&String> = config.mcp_servers.keys().collect();
+    names.sort();
+    for name in names {
+        let server = &config.mcp_servers[name];
+        let transport = if let Some(cmd) = &server.command {
+            format!("stdio ({cmd})")
+        } else if let Some(url) = &server.url {
+            format!("http ({url})")
+        } else {
+            "unknown".to_string()
+        };
+        lines.push(format!("• {name} — {transport}"));
+    }
+    lines.join("\n")
+}
+
+fn format_skills() -> String {
+    let config_dir = match shared::paths::config_dir() {
+        Ok(d) => d,
+        Err(_) => return "Failed to locate config directory.".to_string(),
+    };
+    let skills = match hi_core::skills::load_skills(&config_dir) {
+        Ok(s) => s,
+        Err(_) => return "Failed to load skills.".to_string(),
+    };
+    if skills.is_empty() {
+        return "No skills loaded.".to_string();
+    }
+    let mut lines = vec!["Loaded skills:".to_string()];
+    for s in &skills {
+        lines.push(format!("• {} — {}", s.name, s.description));
+    }
+    lines.join("\n")
 }
 
 async fn send_message_with_retry(bot: &Bot, chat_id: i64, text: &str) -> Result<()> {
@@ -187,7 +369,7 @@ async fn send_message_with_retry(bot: &Bot, chat_id: i64, text: &str) -> Result<
 }
 
 fn split_message(text: &str) -> Vec<String> {
-    if text.len() <= MAX_MESSAGE_LENGTH {
+    if text.chars().count() <= MAX_MESSAGE_LENGTH {
         return vec![text.to_string()];
     }
 
@@ -195,15 +377,21 @@ fn split_message(text: &str) -> Vec<String> {
     let mut remaining = text;
 
     while !remaining.is_empty() {
-        if remaining.len() <= MAX_MESSAGE_LENGTH {
+        if remaining.chars().count() <= MAX_MESSAGE_LENGTH {
             chunks.push(remaining.to_string());
             break;
         }
 
-        let split_at = remaining[..MAX_MESSAGE_LENGTH]
+        let byte_limit = remaining
+            .char_indices()
+            .nth(MAX_MESSAGE_LENGTH)
+            .map(|(i, _)| i)
+            .unwrap_or(remaining.len());
+
+        let split_at = remaining[..byte_limit]
             .rfind('\n')
             .map(|pos| pos + 1)
-            .unwrap_or(MAX_MESSAGE_LENGTH);
+            .unwrap_or(byte_limit);
 
         let (chunk, rest) = remaining.split_at(split_at);
         chunks.push(chunk.to_string());
@@ -269,5 +457,177 @@ mod tests {
         let chunks = split_message(&text);
         let reassembled: String = chunks.join("");
         assert_eq!(reassembled, text);
+    }
+
+    #[test]
+    fn test_split_message_multibyte_utf8() {
+        let unit = "你好世界🎉";
+        let unit_chars = unit.chars().count();
+        let repeats = (MAX_MESSAGE_LENGTH / unit_chars) + 2;
+        let text: String = std::iter::repeat(unit).take(repeats).collect();
+        assert!(text.chars().count() > MAX_MESSAGE_LENGTH);
+
+        let chunks = split_message(&text);
+        assert!(chunks.len() >= 2);
+
+        for chunk in &chunks {
+            assert!(chunk.chars().count() <= MAX_MESSAGE_LENGTH);
+        }
+
+        let reassembled: String = chunks.join("");
+        assert_eq!(reassembled, text);
+    }
+
+    #[test]
+    fn test_format_schedules_empty() {
+        let result = format_schedules(&[]);
+        assert_eq!(result, "No schedules configured.");
+    }
+
+    #[test]
+    fn test_format_schedules_with_entries() {
+        let schedules = vec![
+            shared::config::ScheduleTaskConfig {
+                name: "daily".to_string(),
+                cron: "0 0 * * *".to_string(),
+                model: None,
+                prompt: "Summarize the day.".to_string(),
+            },
+            shared::config::ScheduleTaskConfig {
+                name: "check".to_string(),
+                cron: "*/5 * * * *".to_string(),
+                model: Some(shared::config::ModelRef::Named("small".to_string())),
+                prompt: "Check status.".to_string(),
+            },
+        ];
+        let result = format_schedules(&schedules);
+        assert!(result.contains("daily"));
+        assert!(result.contains("0 0 * * *"));
+        assert!(result.contains("model=default"));
+        assert!(result.contains("check"));
+        assert!(result.contains("model=small"));
+    }
+
+    #[test]
+    fn test_format_schedules_long_prompt_truncated() {
+        let schedules = vec![shared::config::ScheduleTaskConfig {
+            name: "verbose".to_string(),
+            cron: "0 0 * * *".to_string(),
+            model: None,
+            prompt: "A".repeat(100),
+        }];
+        let result = format_schedules(&schedules);
+        assert!(result.contains("…"));
+        assert!(!result.contains(&"A".repeat(100)));
+    }
+
+    #[test]
+    fn test_format_heartbeat_none() {
+        let result = format_heartbeat(None);
+        assert_eq!(result, "Heartbeat: not configured.");
+    }
+
+    #[test]
+    fn test_format_heartbeat_configured() {
+        let hb = shared::config::HeartbeatConfig {
+            enabled: true,
+            interval_secs: 1200,
+            model: Some(shared::config::ModelRef::Named("small".to_string())),
+            prompt: Some("heartbeat check".to_string()),
+        };
+        let result = format_heartbeat(Some(&hb));
+        assert!(result.contains("enabled: true"));
+        assert!(result.contains("interval: 1200s"));
+        assert!(result.contains("model: small"));
+        assert!(result.contains("prompt: heartbeat check"));
+    }
+
+    #[test]
+    fn test_format_heartbeat_disabled_no_prompt() {
+        let hb = shared::config::HeartbeatConfig {
+            enabled: false,
+            interval_secs: 300,
+            model: None,
+            prompt: None,
+        };
+        let result = format_heartbeat(Some(&hb));
+        assert!(result.contains("enabled: false"));
+        assert!(result.contains("model: default"));
+        assert!(result.contains("prompt: (none)"));
+    }
+
+    #[test]
+    fn test_format_mcp_servers_empty() {
+        let config = shared::config::McpConfig {
+            mcp_servers: std::collections::HashMap::new(),
+        };
+        let result = format_mcp_servers(&config);
+        assert_eq!(result, "MCP: no servers configured.");
+    }
+
+    #[test]
+    fn test_format_mcp_servers_with_entries() {
+        let mut servers = std::collections::HashMap::new();
+        servers.insert(
+            "filesystem".to_string(),
+            shared::config::McpServerConfig {
+                command: Some("npx".to_string()),
+                args: Some(vec!["-y".to_string(), "server".to_string()]),
+                env: None,
+                url: None,
+            },
+        );
+        servers.insert(
+            "remote".to_string(),
+            shared::config::McpServerConfig {
+                command: None,
+                args: None,
+                env: None,
+                url: Some("http://localhost:8080/mcp".to_string()),
+            },
+        );
+        let config = shared::config::McpConfig { mcp_servers: servers };
+        let result = format_mcp_servers(&config);
+        assert!(result.contains("filesystem — stdio (npx)"));
+        assert!(result.contains("remote — http (http://localhost:8080/mcp)"));
+    }
+
+    #[test]
+    fn test_handle_cron_command_empty_args_lists() {
+        let config = make_model_config(None);
+        let result = handle_cron_command("", &config);
+        assert_eq!(result, "No schedules configured.");
+    }
+
+    #[test]
+    fn test_handle_cron_command_invalid_sub() {
+        let config = make_model_config(None);
+        let result = handle_cron_command("invalid", &config);
+        assert!(result.contains("Usage:"));
+    }
+
+    #[test]
+    fn test_handle_cron_add_missing_args() {
+        let config = make_model_config(None);
+        let result = handle_cron_add("daily 0 0 * *", &config);
+        assert!(result.contains("Usage:"));
+    }
+
+    #[test]
+    fn test_handle_cron_remove_missing_name() {
+        let config = make_model_config(None);
+        let result = handle_cron_remove("", &config);
+        assert!(result.contains("Usage:"));
+    }
+
+    fn make_model_config(schedules: Option<Vec<shared::config::ScheduleTaskConfig>>) -> ModelConfig {
+        let json_str = r#"{
+            "provider": "ollama",
+            "model": "qwen2.5:14b",
+            "context_window": 32000
+        }"#;
+        let mut config: ModelConfig = serde_json::from_str(json_str).unwrap();
+        config.schedules = schedules;
+        config
     }
 }

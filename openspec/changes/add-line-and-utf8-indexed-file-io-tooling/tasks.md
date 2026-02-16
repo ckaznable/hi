@@ -1,0 +1,5 @@
+- [x] Add `offset` (1-based line number) and `limit` optional parameters to `ReadFileArgs`
+- [x] Output line numbers (`N| content`) and `[Showing lines X-Y of Z]` footer for partial reads
+- [x] Update tool description in `session.rs`
+- [x] Add `tempfile` workspace dep and dev-dependency in `hi-tools`
+- [x] Add 7 tests: full read, offset+limit, offset only, limit exceeds, offset beyond end, nonexistent, utf8

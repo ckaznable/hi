@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_cron_scheduler::{Job, JobScheduler};
 use shared::config::{ModelConfig, ScheduleTaskConfig};
+use shared::runtime_index;
 use crate::model_pool::ModelPool;
 
 pub struct Scheduler {
@@ -30,6 +31,9 @@ impl Scheduler {
         let job_scheduler = JobScheduler::new().await
             .map_err(|e| anyhow::anyhow!("{:?}", e))?;
 
+        let index = runtime_index::load();
+        let context_preamble = index.build_context_preamble();
+
         for task in tasks {
             let small_config = model_config
                 .resolve_model_ref(&task.model);
@@ -38,6 +42,7 @@ impl Scheduler {
             let tx = tx.clone();
             let task_name = task.name.clone();
             let task_prompt = task.prompt.clone();
+            let preamble = context_preamble.clone();
 
             let job = Job::new_async(task.cron.as_str(), move |_uuid, _lock| {
                 let pool = pool.clone();
@@ -45,8 +50,9 @@ impl Scheduler {
                 let name = task_name.clone();
                 let prompt = task_prompt.clone();
                 let cfg = small_config.clone();
+                let preamble = preamble.clone();
                 Box::pin(async move {
-                    let agent = match pool.get_or_create(&cfg, None) {
+                    let agent = match pool.get_or_create(&cfg, Some(&preamble)) {
                         Ok(a) => a,
                         Err(_) => return,
                     };
