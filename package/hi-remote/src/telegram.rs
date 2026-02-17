@@ -256,17 +256,30 @@ fn handle_cron_add(args: &str, config: &ModelConfig) -> String {
         return format!("Schedule '{name}' already exists. Remove it first to replace.");
     }
 
+    let is_first_schedule = schedules.is_empty();
+    let auto_enable = !schedules.iter().any(|s| s.enabled);
+
     schedules.push(shared::config::ScheduleTaskConfig {
         name: name.to_string(),
         cron: cron_expr.clone(),
         model: None,
         prompt: prompt.to_string(),
+        enabled: auto_enable,
     });
 
     match shared::schedule_store::save(&schedules) {
-        Ok(()) => format!(
-            "✓ Added schedule '{name}' ({cron_expr}).\nNote: restart required for schedule to take effect."
-        ),
+        Ok(()) => {
+            let msg = if auto_enable && is_first_schedule {
+                format!(
+                    "✓ Added schedule '{name}' ({cron_expr}).\nSchedule auto-enabled. Restart to activate."
+                )
+            } else {
+                format!(
+                    "✓ Added schedule '{name}' ({cron_expr}).\nNote: restart required for schedule to take effect."
+                )
+            };
+            msg
+        }
         Err(e) => format!("Failed to save schedule: {e}"),
     }
 }
@@ -616,12 +629,14 @@ mod tests {
                 cron: "0 0 * * *".to_string(),
                 model: None,
                 prompt: "Summarize the day.".to_string(),
+                enabled: true,
             },
             shared::config::ScheduleTaskConfig {
                 name: "check".to_string(),
                 cron: "*/5 * * * *".to_string(),
                 model: Some(shared::config::ModelRef::Named("small".to_string())),
                 prompt: "Check status.".to_string(),
+                enabled: false,
             },
         ];
         let result = format_schedules(&schedules);
@@ -639,6 +654,7 @@ mod tests {
             cron: "0 0 * * *".to_string(),
             model: None,
             prompt: "A".repeat(100),
+            enabled: true,
         }];
         let result = format_schedules(&schedules);
         assert!(result.contains("…"));

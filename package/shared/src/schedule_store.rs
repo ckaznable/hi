@@ -67,6 +67,7 @@ mod tests {
             cron: cron.to_string(),
             model: None,
             prompt: prompt.to_string(),
+            enabled: false,
         }
     }
 
@@ -153,6 +154,7 @@ mod tests {
                 cron: "*/5 * * * *".to_string(),
                 model: Some(crate::config::ModelRef::Named("small".to_string())),
                 prompt: "check status".to_string(),
+                enabled: false,
             },
             make_schedule("no-model", "0 0 * * *", "daily task"),
         ];
@@ -171,5 +173,61 @@ mod tests {
         );
         assert_eq!(loaded[1].name, "no-model");
         assert_eq!(loaded[1].model, None);
+    }
+
+    #[test]
+    fn test_save_load_with_enabled_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("schedules.json");
+
+        let schedules = vec![
+            ScheduleTaskConfig {
+                name: "enabled-schedule".to_string(),
+                cron: "0 0 * * *".to_string(),
+                model: None,
+                prompt: "daily task".to_string(),
+                enabled: true,
+            },
+            ScheduleTaskConfig {
+                name: "disabled-schedule".to_string(),
+                cron: "0 12 * * *".to_string(),
+                model: None,
+                prompt: "noon task".to_string(),
+                enabled: false,
+            },
+        ];
+
+        let content = serde_json::to_string_pretty(&schedules).unwrap();
+        std::fs::write(&path, &content).unwrap();
+
+        let loaded: Vec<ScheduleTaskConfig> =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].name, "enabled-schedule");
+        assert!(loaded[0].enabled);
+        assert_eq!(loaded[1].name, "disabled-schedule");
+        assert!(!loaded[1].enabled);
+    }
+
+    #[test]
+    fn test_default_enabled_is_false() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("schedules.json");
+
+        // Write JSON without enabled field
+        let json = r#"[{
+            "name": "test",
+            "cron": "0 0 * * *",
+            "prompt": "test prompt"
+        }]"#;
+        std::fs::write(&path, json).unwrap();
+
+        let loaded: Vec<ScheduleTaskConfig> =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].name, "test");
+        assert!(!loaded[0].enabled, "enabled should default to false");
     }
 }

@@ -212,12 +212,14 @@ mod tests {
                 cron: "0 0 * * *".to_string(),
                 model: None,
                 prompt: "test".to_string(),
+                enabled: true,
             },
             crate::config::ScheduleTaskConfig {
                 name: "hourly".to_string(),
                 cron: "0 * * * *".to_string(),
                 model: None,
                 prompt: "test".to_string(),
+                enabled: false,
             },
         ];
         let names = refresh_schedule_names(&schedules);

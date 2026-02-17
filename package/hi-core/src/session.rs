@@ -1,12 +1,16 @@
 use anyhow::Result;
 use rig::completion::message::Message;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use hi_history::{ChatHistory, ChatMessage};
 use shared::config::{CompactStrategy, ModelConfig};
 
 use crate::context::ContextManager;
+use crate::heartbeat::HeartbeatSystem;
 use crate::mcp::{McpManager, load_and_connect};
+use crate::model_pool::ModelPool;
+use crate::scheduler::Scheduler;
 use crate::provider::{
     ChatAgent, create_agent, create_agent_from_small, create_agent_from_small_with_tools,
 };
@@ -18,6 +22,29 @@ Output only the summary, no preamble.";
 
 pub const DEFAULT_PREAMBLE: &str = "You are a helpful assistant with access to tools. \
 Use them when appropriate to fulfill user requests.";
+
+fn limited_rig_messages(
+    history: &ChatHistory,
+    history_limit: Option<usize>,
+    current_user_text: &str,
+) -> Vec<Message> {
+    let messages = history.messages();
+    let end = match messages.last() {
+        Some(last) if last.role == "user" && last.content == current_user_text => messages.len() - 1,
+        _ => messages.len(),
+    };
+    let base = &messages[..end];
+
+    let selected = match history_limit {
+        Some(limit) => {
+            let start = base.len().saturating_sub(limit);
+            &base[start..]
+        }
+        None => base,
+    };
+
+    selected.iter().map(ChatMessage::to_rig_message).collect()
+}
 
 fn refresh_runtime_index(config: &ModelConfig, data_dir: &std::path::Path) {
     let memory_path = data_dir.join("memory.md");
@@ -39,6 +66,10 @@ pub struct ChatSession {
     using_small_model: bool,
     _mcp_manager: McpManager,
     mcp_tool_names: Vec<String>,
+    #[allow(dead_code)]
+    heartbeat: Option<HeartbeatSystem>,
+    #[allow(dead_code)]
+    scheduler: Option<Scheduler>,
 }
 
 impl ChatSession {
@@ -60,6 +91,43 @@ impl ChatSession {
 
         refresh_runtime_index(&config, &data_dir);
 
+        let (background_tx, mut background_rx) = mpsc::unbounded_channel::<String>();
+
+        let heartbeat = config.heartbeat.as_ref().and_then(|hb_config| {
+            if hb_config.enabled {
+                HeartbeatSystem::start(hb_config, &config, background_tx.clone())
+                    .map_err(|e| tracing::warn!("Failed to start heartbeat: {}", e))
+                    .ok()
+            } else {
+                None
+            }
+        });
+
+        let schedules = shared::schedule_store::load(config.schedules.as_deref());
+        let has_enabled_schedule = schedules.iter().any(|s| s.enabled);
+        let scheduler = if has_enabled_schedule {
+            let pool = Arc::new(ModelPool::new());
+            match Scheduler::start(&schedules, &config, pool, background_tx.clone()).await {
+                Ok(sch) => {
+                    tracing::info!("Scheduler started with {} enabled schedule(s)", 
+                        schedules.iter().filter(|s| s.enabled).count());
+                    Some(sch)
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to start scheduler: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        tokio::spawn(async move {
+            while let Some(msg) = background_rx.recv().await {
+                tracing::info!("[background] {}", msg);
+            }
+        });
+
         Ok(Self {
             agent,
             history,
@@ -69,6 +137,8 @@ impl ChatSession {
             using_small_model: false,
             _mcp_manager: mcp_manager,
             mcp_tool_names,
+            heartbeat,
+            scheduler,
         })
     }
 
@@ -108,7 +178,7 @@ impl ChatSession {
 
         self.history.push(ChatMessage::user(text));
 
-        let rig_messages = self.history.to_rig_messages();
+        let rig_messages = limited_rig_messages(&self.history, self.config.history_limit, text);
         let prompt = Message::user(text);
         let response = match self.agent.chat(prompt, rig_messages).await {
             Ok(r) => r,
@@ -116,7 +186,8 @@ impl ChatSession {
                 if !self.using_small_model && self.config.small_model.is_some() {
                     tracing::warn!("Primary model failed ({e}), falling back to small model");
                     self.switch_to_small_model()?;
-                    let rig_messages = self.history.to_rig_messages();
+                    let rig_messages =
+                        limited_rig_messages(&self.history, self.config.history_limit, text);
                     let retry_prompt = Message::user(text);
                     self.agent.chat(retry_prompt, rig_messages).await?
                 } else {
@@ -275,7 +346,7 @@ impl ChatSession {
 
         self.history.push(ChatMessage::user(text));
 
-        let rig_messages = self.history.to_rig_messages();
+        let rig_messages = limited_rig_messages(&self.history, self.config.history_limit, text);
         let prompt = Message::user(text);
         let fallback_tx = chunk_tx.clone();
         let response = match self.agent.stream_chat(prompt, rig_messages, chunk_tx).await {
@@ -284,7 +355,8 @@ impl ChatSession {
                 if !self.using_small_model && self.config.small_model.is_some() {
                     tracing::warn!("Primary model failed ({e}), falling back to small model");
                     self.switch_to_small_model()?;
-                    let rig_messages = self.history.to_rig_messages();
+                    let rig_messages =
+                        limited_rig_messages(&self.history, self.config.history_limit, text);
                     let retry_prompt = Message::user(text);
                     self.agent
                         .stream_chat(retry_prompt, rig_messages, fallback_tx)
@@ -361,5 +433,46 @@ impl ChatSession {
         self.context_manager.mark_dirty();
 
         Ok(self.config.model.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_limited_rig_messages_unlimited_excludes_current_user() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut history = ChatHistory::load(dir.path()).unwrap();
+        history.push(ChatMessage::system("ctx"));
+        history.push(ChatMessage::assistant("a1"));
+        history.push(ChatMessage::user("current"));
+
+        let result = limited_rig_messages(&history, None, "current");
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_limited_rig_messages_applies_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut history = ChatHistory::load(dir.path()).unwrap();
+        history.push(ChatMessage::assistant("m1"));
+        history.push(ChatMessage::assistant("m2"));
+        history.push(ChatMessage::assistant("m3"));
+        history.push(ChatMessage::user("current"));
+
+        let result = limited_rig_messages(&history, Some(2), "current");
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_limited_rig_messages_zero_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut history = ChatHistory::load(dir.path()).unwrap();
+        history.push(ChatMessage::assistant("m1"));
+        history.push(ChatMessage::user("current"));
+
+        let result = limited_rig_messages(&history, Some(0), "current");
+        assert_eq!(result.len(), 0);
     }
 }

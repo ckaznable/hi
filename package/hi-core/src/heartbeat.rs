@@ -37,6 +37,7 @@ fn create_heartbeat_agent(
         &small_config.api_base,
         preamble,
         tools,
+        None,
     )
 }
 

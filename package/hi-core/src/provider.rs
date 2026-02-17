@@ -9,7 +9,7 @@ use rig::prelude::CompletionClient;
 use rig::providers::{anthropic, gemini, ollama, openai};
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
 use rig::tool::ToolDyn;
-use shared::config::{ModelConfig, Provider, SmallModelConfig};
+use shared::config::{ModelConfig, Provider, SmallModelConfig, ThinkingConfig};
 use tokio::sync::mpsc;
 
 use hi_tools::{
@@ -121,6 +121,7 @@ pub fn create_agent(
         &config.api_base,
         preamble,
         tools,
+        config.thinking.as_ref(),
     )
 }
 
@@ -135,6 +136,7 @@ pub fn create_agent_from_small(
         &config.api_base,
         preamble,
         vec![],
+        config.thinking.as_ref(),
     )
 }
 
@@ -151,6 +153,7 @@ pub fn create_agent_from_small_with_tools(
         &config.api_base,
         preamble,
         tools,
+        config.thinking.as_ref(),
     )
 }
 
@@ -161,6 +164,7 @@ pub(crate) fn create_agent_from_parts(
     api_base: &Option<String>,
     preamble: Option<&str>,
     tools: Vec<Box<dyn ToolDyn>>,
+    thinking: Option<&ThinkingConfig>,
 ) -> Result<ChatAgent> {
     match provider {
         Provider::OpenAI => {
@@ -174,12 +178,14 @@ pub(crate) fn create_agent_from_parts(
                 client
                     .agent(model)
                     .preamble(preamble.unwrap_or_default())
+                    .default_max_turns(32)
                     .build()
             } else {
                 client
                     .agent(model)
                     .tools(tools)
                     .preamble(preamble.unwrap_or_default())
+                    .default_max_turns(32)
                     .build()
             };
             Ok(ChatAgent::OpenAI(agent))
@@ -195,12 +201,14 @@ pub(crate) fn create_agent_from_parts(
                 client
                     .agent(model)
                     .preamble(preamble.unwrap_or_default())
+                    .default_max_turns(32)
                     .build()
             } else {
                 client
                     .agent(model)
                     .tools(tools)
                     .preamble(preamble.unwrap_or_default())
+                    .default_max_turns(32)
                     .build()
             };
             Ok(ChatAgent::OpenAICompatible(agent))
@@ -216,12 +224,14 @@ pub(crate) fn create_agent_from_parts(
                 client
                     .agent(model)
                     .preamble(preamble.unwrap_or_default())
+                    .default_max_turns(32)
                     .build()
             } else {
                 client
                     .agent(model)
                     .tools(tools)
                     .preamble(preamble.unwrap_or_default())
+                    .default_max_turns(32)
                     .build()
             };
             Ok(ChatAgent::Anthropic(agent))
@@ -233,17 +243,83 @@ pub(crate) fn create_agent_from_parts(
                 builder = builder.base_url(base);
             }
             let client = builder.build()?;
+
+            // Build additional params with thinking config if present
+            // Only apply to models that support thinking (Gemini 2.5+ and 3.0+)
+            let additional_params = thinking.and_then(|t| {
+                if model.starts_with("gemini-2.5") {
+                    // Gemini 2.5 uses thinkingBudget (integer)
+                    if let Some(budget) = t.budget_tokens {
+                        Some(serde_json::json!({
+                            "generationConfig": {
+                                "thinkingConfig": {
+                                    "thinkingBudget": budget,
+                                    "includeThoughts": true
+                                }
+                            }
+                        }))
+                    } else {
+                        None
+                    }
+                } else if model.starts_with("gemini-3.") || model.starts_with("gemini-2.0") {
+                    // Gemini 3.0 (and 2.0 Flash thinking) uses thinkingLevel (enum)
+                    // But some versions might still support thinkingBudget, however documents suggest thinkingLevel for 3.0
+                    // If budget is provided but no level, we skip (or could warn).
+                    // If level is provided, we use it.
+                    if let Some(level) = &t.thinking_level {
+                        Some(serde_json::json!({
+                            "generationConfig": {
+                                "thinkingConfig": {
+                                    "thinkingLevel": level,
+                                    "includeThoughts": true
+                                }
+                            }
+                        }))
+                    } else if let Some(budget) = t.budget_tokens {
+                         // Fallback: If user provided budget but model is 3.0, maybe they meant 2.5 or API supports it?
+                         // Documents say they are mutually exclusive.
+                         // Let's assume if they give budget for 3.0, they might be using an older preview that supported it or mixed up.
+                         // But for safety and based on "thinking_budget and thinking_level are not supported together",
+                         // if we want to support both we need to be careful.
+                         // For now, let's try to pass thinkingBudget if level is missing, just in case.
+                         // Or better, mapping budget to level? No, that's magic.
+                         // Let's pass what we have.
+                        Some(serde_json::json!({
+                            "generationConfig": {
+                                "thinkingConfig": {
+                                    "thinkingBudget": budget,
+                                    "includeThoughts": true
+                                }
+                            }
+                        }))
+                    } else {
+                        None
+                    }
+                } else {
+                    tracing::debug!("Model {} does not support thinking config, skipping", model);
+                    None
+                }
+            });
+
             let agent = if tools.is_empty() {
-                client
+                let mut agent_builder = client
                     .agent(model)
                     .preamble(preamble.unwrap_or_default())
-                    .build()
+                    .default_max_turns(32);
+                if let Some(params) = additional_params {
+                    agent_builder = agent_builder.additional_params(params);
+                }
+                agent_builder.build()
             } else {
-                client
+                let mut agent_builder = client
                     .agent(model)
                     .tools(tools)
                     .preamble(preamble.unwrap_or_default())
-                    .build()
+                    .default_max_turns(32);
+                if let Some(params) = additional_params {
+                    agent_builder = agent_builder.additional_params(params);
+                }
+                agent_builder.build()
             };
             Ok(ChatAgent::Gemini(agent))
         }
@@ -257,12 +333,14 @@ pub(crate) fn create_agent_from_parts(
                 client
                     .agent(model)
                     .preamble(preamble.unwrap_or_default())
+                    .default_max_turns(32)
                     .build()
             } else {
                 client
                     .agent(model)
                     .tools(tools)
                     .preamble(preamble.unwrap_or_default())
+                    .default_max_turns(32)
                     .build()
             };
             Ok(ChatAgent::Ollama(agent))
@@ -273,6 +351,103 @@ pub(crate) fn create_agent_from_parts(
 #[cfg(test)]
 mod tests {
     use tokio::sync::mpsc;
+
+    use super::create_agent_from_parts;
+
+    #[tokio::test]
+    async fn test_create_agent_with_thinking_config() {
+        use shared::config::{Provider, ThinkingConfig, ThinkingType};
+
+        // Test creating agent with thinking config
+        let thinking = ThinkingConfig {
+            thinking_type: ThinkingType::Enabled,
+            budget_tokens: Some(1024),
+            thinking_level: None,
+        };
+
+        // Create a minimal config with thinking
+        let agent = create_agent_from_parts(
+            &Provider::Gemini,
+            "gemini-2.5-flash",
+            &Some("test-key".to_string()),
+            &None,
+            Some("Test preamble"),
+            vec![],
+            Some(&thinking),
+        );
+
+        // Agent should be created successfully
+        assert!(agent.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_create_agent_without_thinking_config() {
+        use shared::config::Provider;
+
+        // Test creating agent without thinking config (should work as before)
+        let agent = create_agent_from_parts(
+            &Provider::OpenAI,
+            "gpt-4o",
+            &Some("test-key".to_string()),
+            &None,
+            Some("Test preamble"),
+            vec![],
+            None,
+        );
+
+        // Agent should be created successfully
+        assert!(agent.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_create_agent_thinking_auto() {
+        use shared::config::{Provider, ThinkingConfig, ThinkingType};
+
+        // Test creating agent with thinking auto type
+        let thinking = ThinkingConfig {
+            thinking_type: ThinkingType::Auto,
+            budget_tokens: Some(2048),
+            thinking_level: None,
+        };
+
+        let agent = create_agent_from_parts(
+            &Provider::Gemini,
+            "gemini-2.5-flash",
+            &Some("test-key".to_string()),
+            &None,
+            Some("Test preamble"),
+            vec![],
+            Some(&thinking),
+        );
+
+        // Agent should be created successfully
+        assert!(agent.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_create_agent_thinking_level() {
+        use shared::config::{Provider, ThinkingConfig, ThinkingType};
+
+        // Test creating agent with thinking level
+        let thinking = ThinkingConfig {
+            thinking_type: ThinkingType::Enabled,
+            budget_tokens: None,
+            thinking_level: Some("high".to_string()),
+        };
+
+        let agent = create_agent_from_parts(
+            &Provider::Gemini,
+            "gemini-3.0-flash",
+            &Some("test-key".to_string()),
+            &None,
+            Some("Test preamble"),
+            vec![],
+            Some(&thinking),
+        );
+
+        // Agent should be created successfully
+        assert!(agent.is_ok());
+    }
 
     #[tokio::test]
     async fn test_stream_accumulation_single_buffer() {

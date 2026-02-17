@@ -147,9 +147,10 @@ Main `config.json` fields:
 - `small_model`: optional small-model config
 - `compact`: optional context compaction settings
 - `heartbeat`: optional heartbeat settings
-- `schedules`: optional list of scheduled tasks
+- `schedules`: optional list of scheduled tasks (each with optional `enabled` field, default `false`)
 - `memory`: optional memory reclamation policy
 - `remote`: optional remote adapter config (includes session lifecycle controls)
+- `thinking`: optional extended thinking configuration (for supported models like Gemini)
 
 Example:
 
@@ -163,7 +164,11 @@ Example:
   "small_model": {
     "provider": "ollama",
     "model": "qwen2.5:3b",
-    "context_window": 4096
+    "context_window": 4096,
+    "thinking": {
+      "type": "enabled",
+      "budget_tokens": 512
+    }
   },
   "heartbeat": {
     "enabled": true,
@@ -176,7 +181,8 @@ Example:
       "name": "daily-summary",
       "cron": "0 0 * * *",
       "model": "small",
-      "prompt": "Generate a daily summary."
+      "prompt": "Generate a daily summary.",
+      "enabled": true
     }
   ]
 }
@@ -290,13 +296,58 @@ When a qualifying release occurs, a structured log line is emitted to stderr:
 
 Non-qualifying releases log `action: skip`. Qualifying releases log `action: reclaim`.
 
+## Thinking Configuration
+
+Extended thinking mode for models that support it (e.g., Gemini 2.5 Flash with thinking mode). This allows the model to perform additional reasoning before generating a response.
+
+Can be set at the root level (for the primary model) or within `small_model` configuration:
+
+```json
+{
+  "thinking": {
+    "type": "enabled",
+    "budget_tokens": 1024
+  },
+  "small_model": {
+    "provider": "gemini",
+    "model": "gemini-3.0-flash",
+    "context_window": 8192,
+    "thinking": {
+      "type": "enabled",
+      "thinking_level": "high"
+    }
+  }
+}
+```
+
+- `type`: thinking mode type — `"enabled"` or `"auto"` (provider-specific, may be ignored)
+- `budget_tokens`: maximum number of tokens to allocate for thinking (positive integer)
+  - For Gemini 2.5: maps to `thinkingBudget` API parameter
+  - Set to `0` to disable thinking (Gemini 2.5 Flash only)
+  - Set to `-1` or omit to let the model decide dynamically
+- `thinking_level`: thinking effort level (string)
+  - For Gemini 3.0: maps to `thinkingLevel` API parameter
+  - Valid values: `"low"`, `"medium"`, `"high"`
+
+**Supported Models:**
+- Gemini 2.5 Flash/Pro (e.g., `gemini-2.5-flash`) -> Uses `budget_tokens`
+- Gemini 2.0 Flash (e.g., `gemini-2.0-flash`) -> Uses `thinking_level`
+- Gemini 3.0 Pro/Flash (e.g., `gemini-3.0-pro`) -> Uses `thinking_level`
+
+**Note:** Thinking configuration is silently ignored for models that don't support it (e.g., Gemini 1.5, GPT-4, Claude).
+
+When `thinking` is omitted or set to `null`, the provider's default behavior is used.
+
+**Note:** `small_model` has its own independent `thinking` configuration. If not specified in `small_model`, thinking mode is disabled for the small model (not inherited from the main model).
+
 ## Schedule Persistence
 
 Schedules can be persisted to `data_dir()/schedules.json` independently of the main config file. This allows runtime schedule management without modifying `config.json`.
 
 - On startup, `schedules.json` is loaded first. If it does not exist or is invalid, schedules fall back to the `schedules` array in `config.json`.
 - `schedules.json` is a JSON array of schedule objects.
-- Each schedule object requires `name`, `cron`, and `prompt`. `model` is optional.
+- Each schedule object requires `name`, `cron`, and `prompt`. `model` and `enabled` are optional.
+- `enabled` (boolean, default `false`): controls whether the schedule runs. The scheduler only starts schedules with `enabled: true`.
 
 Example `schedules.json`:
 
@@ -305,16 +356,20 @@ Example `schedules.json`:
   {
     "name": "daily-summary",
     "cron": "0 0 * * *",
-    "prompt": "Generate a daily summary."
+    "prompt": "Generate a daily summary.",
+    "enabled": true
   },
   {
     "name": "hourly-check",
     "cron": "0 * * * *",
     "model": "small",
-    "prompt": "Check system status."
+    "prompt": "Check system status.",
+    "enabled": false
   }
 ]
 ```
+
+**Auto-enable behavior**: When adding a schedule via `/cron add` or the `cron_add` tool, if no schedules are currently enabled, the new schedule is automatically set to `enabled: true` and will start on next session restart.
 
 Invalid entries (missing `name`, `cron`, or `prompt`) are silently skipped with a warning log.
 
@@ -377,7 +432,7 @@ Add `remote` section in `config.json`:
 - `/compact`: compact current session history
 - `/new`: reset current session
 - `/cron`: list schedules loaded from `schedules.json` (or config fallback)
-- `/cron add <name> <min> <hour> <dom> <mon> <dow> <prompt>`: append a schedule to `schedules.json`
+- `/cron add <name> <min> <hour> <dom> <mon> <dow> <prompt>`: append a schedule to `schedules.json`. If no schedules are enabled, the new one is auto-enabled.
 - `/cron remove <name>`: remove a schedule from `schedules.json`
 - `/heartbeat`: show effective heartbeat settings
 - `/mcp`: list configured MCP servers from `mcp.json`

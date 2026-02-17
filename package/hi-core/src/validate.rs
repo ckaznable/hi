@@ -80,6 +80,7 @@ pub async fn validate_config(
         &config.api_base,
         Some("Respond briefly."),
         vec![],
+        config.thinking.as_ref(),
     )
     .map_err(|e| classify_agent_build_error(e, &provider_name, &model_name))?;
 

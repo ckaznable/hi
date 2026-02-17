@@ -64,6 +64,7 @@ mod tests {
                 cron: "0 0 * * *".into(),
                 model: None,
                 prompt: "ping".into(),
+                enabled: true,
             }],
         );
 
@@ -91,6 +92,7 @@ mod tests {
                 cron: "0 0 * * *".into(),
                 model: None,
                 prompt: "ping".into(),
+                enabled: false,
             }],
         );
 

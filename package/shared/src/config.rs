@@ -1,6 +1,6 @@
 use std::io::{BufRead, Write};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -48,6 +48,8 @@ pub struct SmallModelConfig {
     #[serde(default)]
     pub api_base: Option<String>,
     pub context_window: usize,
+    #[serde(default)]
+    pub thinking: Option<ThinkingConfig>,
 }
 
 fn default_heartbeat_model() -> Option<ModelRef> {
@@ -77,6 +79,8 @@ pub struct ScheduleTaskConfig {
     #[serde(default)]
     pub model: Option<ModelRef>,
     pub prompt: String,
+    #[serde(default)]
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -90,6 +94,35 @@ impl Default for CompactStrategy {
     fn default() -> Self {
         Self::Truncate
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ThinkingType {
+    Enabled,
+    Auto,
+}
+
+impl Default for ThinkingType {
+    fn default() -> Self {
+        Self::Enabled
+    }
+}
+
+/// Thinking configuration for different Gemini model versions
+/// - Gemini 2.5: Use `budget_tokens`
+/// - Gemini 3.0: Use `thinking_level` (low/medium/high)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ThinkingConfig {
+    #[serde(rename = "type")]
+    pub thinking_type: ThinkingType,
+    /// Token budget for Gemini 2.5 models (ignored for Gemini 3)
+    #[serde(default)]
+    pub budget_tokens: Option<usize>,
+    /// Thinking level for Gemini 3 models (ignored for Gemini 2.5)
+    /// Valid values: "low", "medium", "high"
+    #[serde(default)]
+    pub thinking_level: Option<String>,
 }
 
 fn default_trigger_ratio() -> f64 {
@@ -187,6 +220,8 @@ pub struct ModelConfig {
     pub preamble: Option<String>,
     pub context_window: usize,
     #[serde(default)]
+    pub history_limit: Option<usize>,
+    #[serde(default)]
     pub small_model: Option<SmallModelConfig>,
     #[serde(default)]
     pub heartbeat: Option<HeartbeatConfig>,
@@ -198,6 +233,8 @@ pub struct ModelConfig {
     pub remote: Option<RemoteConfig>,
     #[serde(default)]
     pub memory: Option<MemoryConfig>,
+    #[serde(default)]
+    pub thinking: Option<ThinkingConfig>,
 }
 
 const CONFIG_TEMPLATE: &str = r#"{
@@ -303,7 +340,11 @@ pub fn guided_init_config() -> Result<std::path::PathBuf> {
             "API key"
         };
         let key = prompt_with_default(&mut reader, &mut stdout, label, "")?;
-        if key.is_empty() { None } else { Some(key) }
+        if key.is_empty() {
+            None
+        } else {
+            Some(key)
+        }
     };
 
     let default_ctx = match provider {
@@ -452,6 +493,7 @@ impl ModelConfig {
             api_key: self.api_key.clone(),
             api_base: self.api_base.clone(),
             context_window: self.context_window,
+            thinking: None,
         }
     }
 }
@@ -485,6 +527,20 @@ mod tests {
         let config: ModelConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.provider, Provider::Ollama);
         assert!(config.api_key.is_none());
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_config_with_history_limit() {
+        let json = r#"{
+            "provider": "openai",
+            "model": "gpt-4o",
+            "api_key": "sk-test",
+            "context_window": 128000,
+            "history_limit": 10
+        }"#;
+        let config: ModelConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.history_limit, Some(10));
         assert!(config.validate().is_ok());
     }
 
@@ -593,6 +649,76 @@ mod tests {
     }
 
     #[test]
+    fn test_config_with_schedules_enabled() {
+        let json = r#"{
+            "provider": "openai",
+            "model": "gpt-4o",
+            "api_key": "sk-test",
+            "context_window": 128000,
+            "schedules": [
+                {
+                    "name": "daily-summary",
+                    "cron": "0 0 * * *",
+                    "model": "small",
+                    "prompt": "Generate a daily summary.",
+                    "enabled": true
+                }
+            ]
+        }"#;
+        let config: ModelConfig = serde_json::from_str(json).unwrap();
+        assert!(config.schedules.is_some());
+        let schedules = config.schedules.as_ref().unwrap();
+        assert_eq!(schedules.len(), 1);
+        assert_eq!(schedules[0].name, "daily-summary");
+        assert!(schedules[0].enabled);
+    }
+
+    #[test]
+    fn test_config_with_schedules_disabled() {
+        let json = r#"{
+            "provider": "openai",
+            "model": "gpt-4o",
+            "api_key": "sk-test",
+            "context_window": 128000,
+            "schedules": [
+                {
+                    "name": "daily-summary",
+                    "cron": "0 0 * * *",
+                    "prompt": "Generate a daily summary.",
+                    "enabled": false
+                }
+            ]
+        }"#;
+        let config: ModelConfig = serde_json::from_str(json).unwrap();
+        assert!(config.schedules.is_some());
+        let schedules = config.schedules.as_ref().unwrap();
+        assert_eq!(schedules.len(), 1);
+        assert!(!schedules[0].enabled);
+    }
+
+    #[test]
+    fn test_config_with_schedules_default_enabled_false() {
+        let json = r#"{
+            "provider": "openai",
+            "model": "gpt-4o",
+            "api_key": "sk-test",
+            "context_window": 128000,
+            "schedules": [
+                {
+                    "name": "daily-summary",
+                    "cron": "0 0 * * *",
+                    "prompt": "Generate a daily summary."
+                }
+            ]
+        }"#;
+        let config: ModelConfig = serde_json::from_str(json).unwrap();
+        assert!(config.schedules.is_some());
+        let schedules = config.schedules.as_ref().unwrap();
+        assert_eq!(schedules.len(), 1);
+        assert!(!schedules[0].enabled, "enabled should default to false");
+    }
+
+    #[test]
     fn test_resolve_model_ref_default() {
         let json = r#"{
             "provider": "openai",
@@ -656,6 +782,7 @@ mod tests {
             api_key: Some("gkey".to_string()),
             api_base: None,
             context_window: 32000,
+            thinking: None,
         };
         let model_ref = Some(ModelRef::Inline(Box::new(inline)));
         let resolved = config.resolve_model_ref(&model_ref);
@@ -758,6 +885,7 @@ mod tests {
             api_key: None,
             api_base: Some("http://custom:9000/v1".to_string()),
             context_window: 8192,
+            thinking: None,
         };
         let model_ref = Some(ModelRef::Inline(Box::new(inline)));
         let resolved = config.resolve_model_ref(&model_ref);
@@ -1136,5 +1264,76 @@ mod tests {
         let mut out = Vec::new();
         let result = prompt_required(&mut reader, &mut out, "API base URL").unwrap();
         assert_eq!(result, "http://localhost:8080");
+    }
+
+    #[test]
+    fn test_config_with_thinking_enabled() {
+        let json = r#"{
+            "provider": "gemini",
+            "model": "gemini-2.5-flash",
+            "api_key": "test-key",
+            "context_window": 1048576,
+            "thinking": {
+                "type": "enabled",
+                "budget_tokens": 1024
+            }
+        }"#;
+        let config: ModelConfig = serde_json::from_str(json).unwrap();
+        assert!(config.thinking.is_some());
+        let thinking = config.thinking.as_ref().unwrap();
+        assert_eq!(thinking.thinking_type, ThinkingType::Enabled);
+        assert_eq!(thinking.budget_tokens, Some(1024));
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_config_with_thinking_auto() {
+        let json = r#"{
+            "provider": "gemini",
+            "model": "gemini-2.5-flash",
+            "api_key": "test-key",
+            "context_window": 1048576,
+            "thinking": {
+                "type": "auto",
+                "budget_tokens": 2048
+            }
+        }"#;
+        let config: ModelConfig = serde_json::from_str(json).unwrap();
+        assert!(config.thinking.is_some());
+        let thinking = config.thinking.as_ref().unwrap();
+        assert_eq!(thinking.thinking_type, ThinkingType::Auto);
+        assert_eq!(thinking.budget_tokens, Some(2048));
+    }
+
+    #[test]
+    fn test_config_with_thinking_level() {
+        let json = r#"{
+            "provider": "gemini",
+            "model": "gemini-3.0-flash",
+            "api_key": "test-key",
+            "context_window": 1048576,
+            "thinking": {
+                "type": "enabled",
+                "thinking_level": "high"
+            }
+        }"#;
+        let config: ModelConfig = serde_json::from_str(json).unwrap();
+        assert!(config.thinking.is_some());
+        let thinking = config.thinking.as_ref().unwrap();
+        assert_eq!(thinking.thinking_type, ThinkingType::Enabled);
+        assert_eq!(thinking.thinking_level, Some("high".to_string()));
+    }
+
+    #[test]
+    fn test_config_without_thinking() {
+        let json = r#"{
+            "provider": "openai",
+            "model": "gpt-4o",
+            "api_key": "sk-test",
+            "context_window": 128000
+        }"#;
+        let config: ModelConfig = serde_json::from_str(json).unwrap();
+        assert!(config.thinking.is_none());
+        assert!(config.validate().is_ok());
     }
 }

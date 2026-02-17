@@ -114,22 +114,34 @@ impl Tool for ScheduleAddTool {
             )));
         }
 
+        let auto_enable = !schedules.iter().any(|s| s.enabled);
+
         let new_schedule = ScheduleTaskConfig {
             name: args.name.trim().to_string(),
             cron: args.cron.trim().to_string(),
             model: args.model.clone(),
             prompt: args.prompt.trim().to_string(),
+            enabled: auto_enable,
         };
 
         schedules.push(new_schedule.clone());
         self.storage.save(&schedules)?;
 
-        Ok(ScheduleMutationOutput {
-            status: "ok",
-            message: format!(
+        let message = if auto_enable {
+            format!(
+                "Added schedule '{}' (cron: {}). Schedule auto-enabled. Restart to activate.",
+                new_schedule.name, new_schedule.cron
+            )
+        } else {
+            format!(
                 "Added schedule '{}' (cron: {}). Restart required for changes to take effect.",
                 new_schedule.name, new_schedule.cron
-            ),
+            )
+        };
+
+        Ok(ScheduleMutationOutput {
+            status: "ok",
+            message,
             schedule: Some(new_schedule),
         })
     }
